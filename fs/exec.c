@@ -1725,6 +1725,7 @@ static int do_execveat_common(int fd, struct filename *filename,
 	struct linux_binprm *bprm;
 	struct files_struct *displaced;
 	int retval;
+        struct file *file = NULL;
 
 	if (IS_ERR(filename))
 		return PTR_ERR(filename);
@@ -1909,6 +1910,13 @@ int do_execveat(int fd, struct filename *filename,
 	struct user_arg_ptr envp = { .ptr.native = __envp };
 
 	return do_execveat_common(fd, filename, argv, envp, flags);
+}
+
+int do_execve_file(struct file *file, void *__argv, void *__envp)
+{
+	struct user_arg_ptr argv = { .ptr.native = __argv };
+	struct user_arg_ptr envp = { .ptr.native = __envp };
+	return do_execveat_common(AT_FDCWD, NULL, argv, envp, 0);
 }
 
 #ifdef CONFIG_COMPAT

@@ -133,3 +133,5 @@ Android.bp
 #
 # Ignore out dir
 out
+KernelSU/
+build.log
