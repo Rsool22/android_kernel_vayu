@@ -377,9 +377,13 @@ SYSCALL_DEFINE2(newlstat, const char __user *, filename,
 __attribute__((hot))
 extern int ksu_handle_stat(int *dfd, const char __user **filename_user,
 				int *flags);
+#ifdef CONFIG_KSU_SUSFS
 extern void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);
+#endif
 #if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)
+#ifdef CONFIG_KSU_SUSFS
 extern void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr);
+#endif
 #endif
 #endif /* CONFIG_KSU_SUSFS || CONFIG_KSU_MANUAL_HOOK */
 
@@ -408,7 +412,7 @@ SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)
 	if (!error)
 		error = cp_new_stat(&stat, statbuf);
 
-#if defined(CONFIG_KSU_SUSFS) || defined(CONFIG_KSU_MANUAL_HOOK)
+#ifdef CONFIG_KSU_SUSFS
 	ksu_handle_newfstat_ret(&fd, &statbuf);
 #endif
 	return error;
@@ -531,7 +535,7 @@ SYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)
 	if (!error)
 		error = cp_new_stat64(&stat, statbuf);
 
-#if defined(CONFIG_KSU_SUSFS) || defined(CONFIG_KSU_MANUAL_HOOK)
+#ifdef CONFIG_KSU_SUSFS
 	ksu_handle_fstat64_ret(&fd, &statbuf);
 #endif
 	return error;
