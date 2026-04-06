@@ -1020,6 +1020,7 @@ do_package() {
 
     cp "${objdir}/arch/arm64/boot/Image"    "${anykernel}/Image"
     cp "${objdir}/arch/arm64/boot/dtbo.img" "${anykernel}/dtbo.img" 2>/dev/null || true
+    cp "${objdir}/arch/arm64/boot/dtb.img"  "${anykernel}/dtb.img"  2>/dev/null || true
 
     local _zip_rc_file; _zip_rc_file=$(mktemp /tmp/vkb_zip_XXXXXX)
     (
