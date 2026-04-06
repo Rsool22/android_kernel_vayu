@@ -39,12 +39,13 @@ _build_log_base() {
     local name="[${PROJECT_NAME}-Project]"
     [ -n "$KERNEL_NAME" ] && name="${name}-[Kernel-Name=${KERNEL_NAME}]"
     if $FEAT_KSU; then
+        local btag; [ "$KSU_BRANCH" = "dev" ] && btag="DEV" || btag="MAIN"
         local hook; $FEAT_SUSFS && hook="SuSFS-Inline-Hook" || hook="Manual-Hook"
-        name="${name}-[ReSukiSU=${hook}]"
+        name="${name}-[${btag}-ReSukiSU=${hook}]"
         local extras=""
         $FEAT_SUSFS && extras="SuSFS"
         $FEAT_KPM   && extras="${extras:+${extras}+}KPM"
-        [ -n "$extras" ] && name="${name}-(Features=${extras})"
+        [ -n "$extras" ] && name="${name}-(+${extras})"
     fi
     echo "${name}-(${bdate})"
 }
@@ -79,20 +80,35 @@ _commit_build_num() { echo "$BUILD_NUM" > "$BUILD_NUM_FILE"; }
 
 reset_build_num() {
     echo "0" > "$BUILD_NUM_FILE"
+    # Also reset the kernel's internal build counter (.version → uname -v shows "#N")
+    echo "0" > "${objdir}/.version" 2>/dev/null || true
     _read_build_num
 }
 
 _read_build_num
 
+# ── ReSukiSU branch — persisted to state file ───────────────────────────────
+# main = stable release  │  dev = latest development branch
+KSU_BRANCH="main"
+
+# ── Update-menu toast state ───────────────────────────────────────────────────
+# Shown inline on the [U] row; cleared on branch toggle or return.
+_UPDATE_MSG=""
+_UPDATE_MSG_C="$LGR"
+_LAST_PULL_STATUS=0   # 0 = success  1 = fail; written by _do_resukisu_pull
+
 # ── Persistent state: save/load incremental preference ───────────────────────
-_save_state() { printf "INCREMENTAL=%s\nUSE_CCACHE=%s\n" "$INCREMENTAL" "$USE_CCACHE" > "$STATE_FILE"; }
+_save_state() { printf "INCREMENTAL=%s\nUSE_CCACHE=%s\nKSU_BRANCH=%s\n" "$INCREMENTAL" "$USE_CCACHE" "$KSU_BRANCH" > "$STATE_FILE"; }
 
 _load_state() {
     INCREMENTAL=false
+    KSU_BRANCH="main"
     # shellcheck source=/dev/null
     [ -f "$STATE_FILE" ] && source "$STATE_FILE" 2>/dev/null || true
     # If ccache binary is absent, force USE_CCACHE off regardless of saved state
     [ -z "$CCACHE_BIN" ] && USE_CCACHE=false
+    # Validate branch value
+    [ "$KSU_BRANCH" != "main" ] && [ "$KSU_BRANCH" != "dev" ] && KSU_BRANCH="main"
     _update_make_cc
 }
 
@@ -360,12 +376,13 @@ toggle_config() {
 # feat_str — display string for all boxes and saved state.
 feat_str() {
     if $FEAT_KSU; then
+        local btag; [ "$KSU_BRANCH" = "dev" ] && btag="DEV" || btag="MAIN"
         local hook; $FEAT_SUSFS && hook="SuSFS-Inline-Hook" || hook="Manual-Hook"
-        local s="[ReSukiSU:${hook}]"
+        local s="[${btag}-ReSukiSU=${hook}]"
         local extras=""
         $FEAT_SUSFS && extras="SuSFS"
         $FEAT_KPM   && extras="${extras:+${extras}+}KPM"
-        [ -n "$extras" ] && s="${s}  (Features:${extras})"
+        [ -n "$extras" ] && s="${s}  (Features=${extras})"
         echo "$s"
     else
         echo "Vanilla"
@@ -390,18 +407,18 @@ draw_title() {
     [ -z "$clang_ver" ] && clang_ver="unknown"
 
     box_top "$MAG"
-    box_ctr "$MAG" "$WHT" "VAYU  KERNEL  BUILDER  ─  AnyMore Project"
+    box_ctr "$MAG" "$WHT" "VAYU  KERNEL  BUILDER  --  AnyMore Project"
     box_rule "$MAG" "$DIM"
-    box_ctr "$MAG" "$DIM" "Linux 4.14 NonGKI  │  Poco X3 Pro (vayu)  │  Android 16  │  Clang ${clang_ver}"
+    box_ctr "$MAG" "$DIM" "Linux 4.14 NonGKI  |  Poco X3 Pro (vayu)  |  Android 16  |  Clang ${clang_ver}"
     box_bot "$MAG"
 }
 
 # draw_title_static — skips clang version lookup for menus that redraw on resize
 draw_title_static() {
     box_top "$MAG"
-    box_ctr "$MAG" "$WHT" "VAYU  KERNEL  BUILDER  ─  AnyMore Project"
+    box_ctr "$MAG" "$WHT" "VAYU  KERNEL  BUILDER  --  AnyMore Project"
     box_rule "$MAG" "$DIM"
-    box_ctr "$MAG" "$DIM" "Linux 4.14 NonGKI  │  Poco X3 Pro (vayu)  │  Android 16"
+    box_ctr "$MAG" "$DIM" "Linux 4.14 NonGKI  |  Poco X3 Pro (vayu)  |  Android 16"
     box_bot "$MAG"
 }
 
@@ -677,9 +694,9 @@ prompt_kernel_name() {
     box_ctr "$CYN" "$YEL" "SET  KERNEL  NAME"
     box_div "$CYN"
     if [ -n "$KERNEL_NAME" ]; then
-        box_wrap "$CYN" "$WHT" "  Current    " "${KERNEL_NAME}"
+        box_wrap "$CYN" "$WHT" "  Current      " "${KERNEL_NAME}"
     else
-        box_row "$CYN" "$GRY" "  Current     : (none — base version used as-is)"
+        box_row "$CYN" "$GRY" "  Current       : (none — base version used as-is)"
     fi
     box_rule "$CYN" "$DIM"
     box_row "$CYN" "$GRY" "  Sets the LOCALVERSION suffix appended after the base kernel version."
@@ -750,7 +767,7 @@ run_build_menu() {
                 _draw_build_full ;;
             s)  _SKIP_DEFCONFIG=$MENUCONFIG_USED; do_build; return 0 ;;
             x)  reset_build_num
-                BUILD_MSG="Build counter reset — next successful build will be #1"
+                BUILD_MSG="Both counters reset — zip/log #1 · kernel uname #1 on next build"
                 BUILD_MSG_C="$LRD"
                 _draw_build_full ;;
             b)  return 1 ;;
@@ -777,14 +794,14 @@ draw_summary() {
     box_top "$YEL"
     box_ctr "$YEL" "$YEL" "BUILD  SUMMARY"
     box_div "$YEL"
-    box_row "$YEL" "$WHT" "  Target      : vayu_a16_kernel (Linux 4.14 NonGKI)"
-    box_row "$YEL" "$WHT" "  Build       : #${BUILD_NUM}"
+    box_row "$YEL" "$WHT" "  Target        : vayu_a16_kernel (Linux 4.14 NonGKI)"
+    box_row "$YEL" "$WHT" "  Build         : #${BUILD_NUM}"
     [ -n "$KERNEL_NAME" ] && \
-        box_wrap "$YEL" "$WHT" "  Kernel-Name" "${KERNEL_NAME}"
-    box_row "$YEL" "$WHT" "  Features    : ${fs}"
-    box_row "$YEL" "$WHT" "  Mode        : ${mode}"
-    box_row "$YEL" "$WHT" "  ccache      : ${cc_label}"
-    box_row "$YEL" "$WHT" "  Output      : ${OUTPUT_DIR}"
+        box_wrap "$YEL" "$WHT" "  Kernel-Name  " "${KERNEL_NAME}"
+    box_wrap "$YEL" "$WHT" "  Capabilities " "${fs}"
+    box_row "$YEL" "$WHT" "  Mode          : ${mode}"
+    box_row "$YEL" "$WHT" "  ccache        : ${cc_label}"
+    box_row "$YEL" "$WHT" "  Output        : ${OUTPUT_DIR}"
     if $_SKIP_DEFCONFIG; then
         box_rule "$YEL" "$YEL" "Menuconfig"
         if $_PRESERVE_ACTIVE; then
@@ -839,17 +856,17 @@ print_success_box() {
     log_sep "OUTPUT"
     print_success_art
     box_top "$LGR"
-    box_row "$LGR" "$WHT" "  Build       : #${BUILD_NUM}"
+    box_row "$LGR" "$WHT" "  Build         : #${BUILD_NUM}"
     [ -n "$KERNEL_NAME" ] && \
-        box_wrap "$LGR" "$WHT" "  Kernel-Name" "${KERNEL_NAME}"
-    box_row "$LGR" "$WHT" "  Features    : ${fs}"
-    box_row "$LGR" "$WHT" "  ccache      : ${cc_label}"
-    box_row "$LGR" "$WHT" "  Time        : ${elapsed}"
-    box_row "$LGR" "$WHT" "  When        : $(date '+%Y-%m-%d %H:%M')"
+        box_wrap "$LGR" "$WHT" "  Kernel-Name  " "${KERNEL_NAME}"
+    box_wrap "$LGR" "$WHT" "  Capabilities " "${fs}"
+    box_row "$LGR" "$WHT" "  ccache        : ${cc_label}"
+    box_row "$LGR" "$WHT" "  Time          : ${elapsed}"
+    box_row "$LGR" "$WHT" "  When          : $(date '+%Y-%m-%d %H:%M')"
     box_rule "$LGR" "$LGR"
-    box_wrap "$LGR" "$LGR" "  Zip        " "$zipname"
-    [ -n "$zip_size" ] && box_row "$LGR" "$GRY" "  Size        : ${zip_size}"
-    box_row "$LGR" "$GRY" "  Output      : ${OUTPUT_DIR}"
+    box_wrap "$LGR" "$LGR" "  Zip          " "$zipname"
+    [ -n "$zip_size" ] && box_row "$LGR" "$GRY" "  Size          : ${zip_size}"
+    box_row "$LGR" "$GRY" "  Output        : ${OUTPUT_DIR}"
     box_bot "$LGR"
 }
 
@@ -893,7 +910,7 @@ print_fail_box() {
         box_ctr "$LRD" "$GRY" "(log file not found)"
     fi
     box_rule "$LRD" "$GRY"
-    box_wrap "$LRD" "$GRY" "  Log        " "${logfile##*/}"
+    box_wrap "$LRD" "$GRY" "  Log          " "${logfile##*/}"
     box_bot "$LRD"
 }
 
@@ -904,7 +921,7 @@ print_cancelled_box() {
     box_top "$YEL"
     box_ctr "$YEL" "$WHT" "Build cancelled by user"
     box_rule "$YEL" "$GRY"
-    box_row "$YEL" "$GRY" "  Elapsed     : ${elapsed}"
+    box_row "$YEL" "$GRY" "  Elapsed       : ${elapsed}"
     box_row "$YEL" "$GRY" "  Objects in out/ are intact for incremental retry"
     box_bot "$YEL"
 }
@@ -1014,12 +1031,13 @@ do_package() {
     box_top "$MAG"
     box_ctr "$MAG" "$MAG" "Packaging AnyKernel3 zip..."
     box_rule "$MAG" "$DIM"
-    box_row "$MAG" "$GRY" "  Output      : ${zipname}"
+    box_wrap "$MAG" "$GRY" "  Output       " "${zipname}"
     box_bot "$MAG"
     printf "\n"
 
     cp "${objdir}/arch/arm64/boot/Image"    "${anykernel}/Image"
     cp "${objdir}/arch/arm64/boot/dtbo.img" "${anykernel}/dtbo.img" 2>/dev/null || true
+    cp "${objdir}/arch/arm64/boot/dtb.img"  "${anykernel}/dtb.img"  2>/dev/null || true
     cp "${objdir}/arch/arm64/boot/dtb.img"  "${anykernel}/dtb.img"  2>/dev/null || true
 
     local _zip_rc_file; _zip_rc_file=$(mktemp /tmp/vkb_zip_XXXXXX)
@@ -1046,23 +1064,193 @@ do_package() {
 # =============================================================================
 # UPDATE RESUKISU DRIVER
 # =============================================================================
+
+# _ksu_local_commit — resolve the drivers/kernelsu symlink then walk up the
+# directory tree until a .git entry is found, returning that repo's HEAD SHA.
+# Handles: real dir, symlink into a standalone clone, git submodule file.
+_ksu_local_commit() {
+    local _ksu_dir="${kernel_dir}/drivers/kernelsu"
+    # Resolve symlink (if any) to its real path
+    local real_path
+    real_path=$(readlink -f "$_ksu_dir" 2>/dev/null)
+    [ -z "$real_path" ] && real_path="$_ksu_dir"
+    [ ! -e "$real_path" ] && { echo ""; return; }
+    local dir="$real_path"
+    while [ "$dir" != "/" ]; do
+        if [ -d "${dir}/.git" ] || [ -f "${dir}/.git" ]; then
+            git -C "$dir" rev-parse HEAD 2>/dev/null
+            return
+        fi
+        dir=$(dirname "$dir")
+    done
+    echo ""
+}
+
+# _check_resukisu_update — compare local driver commit vs remote branch HEAD.
+# Prints exactly one of:
+#   up_to_date:<sha8>       local matches remote
+#   update_available:<sha8> remote is ahead (sha8 = remote short hash)
+#   no_local                drivers/kernelsu has no git history (first install)
+#   network_fail            could not reach GitHub
+_check_resukisu_update() {
+    local branch="$KSU_BRANCH"
+    local remote_commit
+    remote_commit=$(git ls-remote "https://github.com/ReSukiSU/ReSukiSU.git" \
+        "refs/heads/${branch}" 2>/dev/null | awk '{print $1; exit}')
+    if [ -z "$remote_commit" ]; then
+        echo "network_fail"; return
+    fi
+    local local_commit; local_commit=$(_ksu_local_commit)
+    if [ -z "$local_commit" ]; then
+        echo "no_local"; return
+    fi
+    if [ "$local_commit" = "$remote_commit" ]; then
+        echo "up_to_date:${local_commit:0:8}"
+    else
+        echo "update_available:${remote_commit:0:8}"
+    fi
+}
+
+# _draw_update_menu — draws the ReSukiSU update screen with branch toggle
+_draw_update_menu() {
+    _MENU_REDRAW_FN="_draw_update_menu"
+    _winch_enable
+    set_width
+    _cursor_hide
+    printf '\033[H'
+    draw_title_static
+
+    box_top "$ORG"
+    box_ctr "$ORG" "$YEL" "ReSukiSU  DRIVER  MANAGER"
+    box_div "$ORG"
+    box_row "$ORG" "$WHT" "  Source        : github.com/ReSukiSU/ReSukiSU"
+    box_row "$ORG" "$GRY" "  Target        : ${kernel_dir}/drivers/kernelsu"
+    box_rule "$ORG" "$DIM"
+    if [ "$KSU_BRANCH" = "dev" ]; then
+        box_kv "$ORG" "$WHT" "$YEL" \
+            "  Active branch : dev" \
+            "  (Latest development — may be unstable) "
+    else
+        box_kv "$ORG" "$WHT" "$LGR" \
+            "  Active branch : main" \
+            "  (Stable release — recommended) "
+    fi
+    box_rule "$ORG" "$DIM"
+    if [ -n "$_UPDATE_MSG" ]; then
+        box_kv "$ORG" "$WHT" "$_UPDATE_MSG_C" "  [U]  Update Driver" "  ${_UPDATE_MSG}  "
+    else
+        box_row "$ORG" "$WHT" "  [U]  Update Driver  (pull from active branch)"
+    fi
+    box_row "$ORG" "$CYN" "  [S]  Switch Branch  (main <-> dev, auto-pulls)"
+    box_rule "$ORG" "$DIM"
+    box_row "$ORG" "$GRY" "  [R]  Return to menu"
+    box_bot "$ORG"
+
+    printf '\033[J'
+    _cursor_show
+    printf "\n${ORG}  Select [U/S/R]: ${NC}"
+}
+
 do_update_resukisu() {
     _winch_disable
     set_width
     do_clear
+    _draw_update_menu
 
-    box_top "$CYN"
-    box_ctr "$CYN" "$YEL" "UPDATE  ReSukiSU  DRIVER"
-    box_div "$CYN"
-    box_row "$CYN" "$WHT" "  Source      : github.com/ReSukiSU/ReSukiSU"
-    box_row "$CYN" "$WHT" "  Branch      : main"
-    box_row "$CYN" "$WHT" "  Target      : ${kernel_dir}/drivers/kernelsu"
-    box_bot "$CYN"
+    while true; do
+        IFS= read -r -s -n1 key
+        if [ "$key" = $'\033' ]; then
+            IFS= read -r -s -t 0.05 -n5 _esc 2>/dev/null
+            _drain_input; _draw_update_menu; continue
+        fi
+        _drain_input
+        key=$(printf '%s' "$key" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')
+        case "$key" in
+            s)  [ "$KSU_BRANCH" = "main" ] && KSU_BRANCH="dev" || KSU_BRANCH="main"
+                _save_state
+                _UPDATE_MSG="Pulling ${KSU_BRANCH} branch..."; _UPDATE_MSG_C="$CYN"
+                _draw_update_menu
+                _do_resukisu_pull
+                if [ "$_LAST_PULL_STATUS" -eq 0 ]; then
+                    _UPDATE_MSG="✓ Switched to ${KSU_BRANCH} and updated"; _UPDATE_MSG_C="$LGR"
+                else
+                    _UPDATE_MSG="✗ Switch to ${KSU_BRANCH} failed — check output"; _UPDATE_MSG_C="$LRD"
+                fi
+                set_width; do_clear; _draw_update_menu
+                continue ;;
+            u)  # ── Step 1: show "Checking…" inline on [U] row ──────────────
+                _UPDATE_MSG="Checking…"; _UPDATE_MSG_C="$CYN"
+                _draw_update_menu
+                # ── Step 2: compare local SHA vs remote HEAD ─────────────────
+                local _chk; _chk=$(_check_resukisu_update)
+                case "$_chk" in
+                    up_to_date:*)
+                        # Already current — no pull needed, toast stays visible
+                        _UPDATE_MSG="● Up-to-date  (${_chk#up_to_date:})"; _UPDATE_MSG_C="$LGR"
+                        _draw_update_menu ;;
+                    update_available:*)
+                        # Remote is ahead — proceed with pull
+                        local _rsha="${_chk#update_available:}"
+                        _UPDATE_MSG=""; _UPDATE_MSG_C="$LGR"
+                        _do_resukisu_pull
+                        # Post-pull: redraw with result toast
+                        if [ "$_LAST_PULL_STATUS" -eq 0 ]; then
+                            _UPDATE_MSG="✓ Updated to ${_rsha}"; _UPDATE_MSG_C="$LGR"
+                        else
+                            _UPDATE_MSG="✗ Update failed — see output above"; _UPDATE_MSG_C="$LRD"
+                        fi
+                        set_width; do_clear; _draw_update_menu ;;
+                    no_local)
+                        # No local git history — first install, pull unconditionally
+                        _UPDATE_MSG=""; _UPDATE_MSG_C="$LGR"
+                        _do_resukisu_pull
+                        if [ "$_LAST_PULL_STATUS" -eq 0 ]; then
+                            _UPDATE_MSG="✓ Driver installed successfully"; _UPDATE_MSG_C="$LGR"
+                        else
+                            _UPDATE_MSG="✗ Install failed — see output above"; _UPDATE_MSG_C="$LRD"
+                        fi
+                        set_width; do_clear; _draw_update_menu ;;
+                    network_fail)
+                        _UPDATE_MSG="✗ Network error — check connection"; _UPDATE_MSG_C="$LRD"
+                        _draw_update_menu ;;
+                    *)
+                        # Unknown result — pull anyway (safe fallback)
+                        _UPDATE_MSG=""; _do_resukisu_pull
+                        set_width; do_clear; _draw_update_menu ;;
+                esac
+                continue ;;
+            r)  _UPDATE_MSG=""; _UPDATE_MSG_C="$LGR"; break ;;
+            '') continue ;;
+        esac
+    done
+    _winch_disable
+}
+
+_do_resukisu_pull() {
+    _winch_disable
+    set_width
+    do_clear
+
+    local branch="$KSU_BRANCH"
+    # Always fetch setup.sh from main (stable, reliable).
+    # Pass $branch as positional arg so setup.sh clones/pulls the correct branch.
+    local setup_url="https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh"
+
+    box_top "$ORG"
+    box_ctr "$ORG" "$YEL" "UPDATE  ReSukiSU  DRIVER"
+    box_div "$ORG"
+    box_row "$ORG" "$WHT" "  Source        : github.com/ReSukiSU/ReSukiSU"
+    if [ "$branch" = "dev" ]; then
+        box_kv "$ORG" "$WHT" "$YEL" "  Branch        : dev" "  (development)  "
+    else
+        box_kv "$ORG" "$WHT" "$LGR" "  Branch        : main" "  (stable)       "
+    fi
+    box_row "$ORG" "$GRY" "  Target        : ${kernel_dir}/drivers/kernelsu"
+    box_bot "$ORG"
     printf "\n"
 
     log_sep "RUNNING SETUP.SH"
 
-    local setup_url="https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh"
     local _rc_file; _rc_file=$(mktemp /tmp/vkb_upd_XXXXXX)
 
     # If drivers/kernelsu is a real directory (not a symlink), setup.sh's
@@ -1076,7 +1264,7 @@ do_update_resukisu() {
 
     (
         cd "$kernel_dir" || exit 1
-        bash <(curl -LSs "$setup_url")
+        bash <(curl -LSs "$setup_url") "$branch"
         echo "$?" > "$_rc_file"
     ) 2>&1 | while IFS= read -r l; do printf "  ${GRY}%s${NC}\n" "$l"; done
 
@@ -1092,35 +1280,39 @@ do_update_resukisu() {
 
     printf "\n"
     if [ "$UPDATE_EXIT" -eq 0 ] && [ "$ksu_c_count" -gt 5 ] && $kbuild_ok; then
+        _LAST_PULL_STATUS=0
         box_top "$LGR"
         box_ctr "$LGR" "$LGR" "ReSukiSU driver updated successfully"
         box_rule "$LGR" "$DIM"
-        box_row "$LGR" "$WHT" "  .c files    : ${ksu_c_count} found"
-        box_row "$LGR" "$WHT" "  Kbuild      : present"
+        box_row "$LGR" "$WHT" "  Branch        : ${branch}"
+        box_row "$LGR" "$WHT" "  .c files      : ${ksu_c_count} found"
+        box_row "$LGR" "$WHT" "  Kbuild        : present"
         box_bot "$LGR"
     else
+        _LAST_PULL_STATUS=1
         box_top "$LRD"
         box_ctr "$LRD" "$LRD" "Update failed or source tree incomplete"
         box_rule "$LRD" "$DIM"
-        box_row "$LRD" "$WHT" "  .c files found  : ${ksu_c_count}  (expect > 5)"
-        box_row "$LRD" "$WHT" "  Kbuild present  : $( $kbuild_ok && echo YES || echo NO )"
+        box_row "$LRD" "$WHT" "  Branch        : ${branch}"
+        box_row "$LRD" "$WHT" "  .c files      : ${ksu_c_count}  (expect > 5)"
+        box_row "$LRD" "$WHT" "  Kbuild        : $( $kbuild_ok && echo YES || echo NO )"
         box_row "$LRD" "$YEL" "  Check curl / network and retry"
         box_bot "$LRD"
     fi
 
     printf "\n"
-    box_top "$WHT"
-    box_row "$WHT" "$WHT" "  [R]  Return to menu"
-    box_bot "$WHT"
-    printf "\n${WHT}  Press [R] to return: ${NC}"
+    box_top "$ORG"
+    box_row "$ORG" "$WHT" "  [R]  Return"
+    box_bot "$ORG"
+    printf "\n${ORG}  Press [R] to return: ${NC}"
 
     while true; do
-        IFS= read -r -s -n1 key
-        [ "$key" = $'\033' ] && { IFS= read -r -s -t 0.05 -n5 _esc 2>/dev/null; _drain_input; continue; }
+        IFS= read -r -s -n1 key2
+        [ "$key2" = $'\033' ] && { IFS= read -r -s -t 0.05 -n5 _esc 2>/dev/null; _drain_input; continue; }
         _drain_input
-        key=$(printf '%s' "$key" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')
-        [ "$key" = "r" ] && break
-        [ "$key" = "" ] && continue
+        key2=$(printf '%s' "$key2" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')
+        [ "$key2" = "r" ] && break
+        [ "$key2" = "" ] && continue
     done
 }
 
@@ -1216,6 +1408,14 @@ do_build() {
 
     mkdir -p "$OUTPUT_DIR"
     local fail_log="${OUTPUT_DIR}/$(_fail_log_name)"
+
+    # ── Strip CONFIG_LOCALVERSION from .config when custom name is set ────────
+    # Without this, the kernel version becomes 4.14.xxx-perf-CustomName because
+    # CONFIG_LOCALVERSION="-perf" in the .config is concatenated before LOCALVERSION.
+    # Zeroing it here ensures uname -r shows 4.14.xxx-CustomName cleanly.
+    if [ -n "$KERNEL_NAME" ] && [ -f "${objdir}/.config" ]; then
+        sed -i 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION=""/' "${objdir}/.config"
+    fi
 
     # ── Stage 3: Compile ─────────────────────────────────────────────────────
     log_sep "STAGE 3 — COMPILE"
@@ -1353,8 +1553,8 @@ do_package_only() {
     box_top "$MAG"
     box_ctr "$MAG" "$WHT" "PACKAGE  EXISTING  IMAGES"
     box_div "$MAG"
-    box_row "$MAG" "$WHT" "  Image       : ${objdir}/arch/arm64/boot/Image"
-    box_row "$MAG" "$WHT" "  Feat        : ${fs}"
+    box_row "$MAG" "$WHT" "  Image         : ${objdir}/arch/arm64/boot/Image"
+    box_row "$MAG" "$WHT" "  Feat          : ${fs}"
     box_bot "$MAG"
     printf "\n"
 
@@ -1405,14 +1605,14 @@ _draw_mode_menu() {
     else
         # Build # and date on their own row — always short, never clashes
         box_kv  "$GRY" "$GRY" "$GRY" \
-            "  Build       : #${PREV_NUM}" \
+            "  Build         : #${PREV_NUM}" \
             "${PREV_DATE:+${PREV_DATE} }"
         [ -n "$PREV_KNAME" ] && \
-            box_wrap "$GRY" "$GRY" "  Kernel-Name" "${PREV_KNAME}"
-        box_row "$GRY" "$GRY" "  Mode        : ${PREV_MODE}"
+            box_wrap "$GRY" "$GRY" "  Kernel-Name  " "${PREV_KNAME}"
+        box_row "$GRY" "$GRY" "  Mode          : ${PREV_MODE}"
         box_rule "$GRY" "$DIM"
-        # Features can be long — wrap onto next row if needed
-        box_wrap "$GRY" "$GRY" "  Features   " "${PREV_FEAT}"
+        # Capabilities can be long — wrap onto next row if needed
+        box_wrap "$GRY" "$GRY" "  Capabilities " "${PREV_FEAT}"
     fi
     box_bot "$GRY"
 
@@ -1427,7 +1627,11 @@ _draw_mode_menu() {
         box_row "$CYN" "$GRY" "       Package Only — no Image found in out/"
     fi
     box_rule "$CYN" "$DIM"
-    box_row "$CYN" "$CYN" "  [U]  Update ReSukiSU Driver"
+    if [ "$KSU_BRANCH" = "dev" ]; then
+        box_kv "$CYN" "$WHT" "$YEL" "  [M]  ReSukiSU Driver Manager" "branch: dev  "
+    else
+        box_kv "$CYN" "$WHT" "$LGR" "  [M]  ReSukiSU Driver Manager" "branch: main "
+    fi
     box_rule "$CYN" "$DIM"
     box_row "$CYN" "$GRY" "  [Q]  Quit"
     box_bot "$CYN"
@@ -1442,9 +1646,9 @@ _draw_mode_menu() {
     printf '\033[J'
     _cursor_show
     if $has_image; then
-        printf "\n${WHT}  Select [B/P/U/Q]: ${NC}"
+        printf "\n${WHT}  Select [B/P/M/Q]: ${NC}"
     else
-        printf "\n${WHT}  Select [B/U/Q]: ${NC}"
+        printf "\n${WHT}  Select [B/M/Q]: ${NC}"
     fi
 }
 
@@ -1467,7 +1671,7 @@ run_mode_menu() {
         case "$choice" in
             b)  return 0 ;;
             p)  $has_image && return 2 ;;
-            u)  do_update_resukisu
+            m)  do_update_resukisu
                 _draw_mode_menu
                 has_image=false; [ -f "${objdir}/arch/arm64/boot/Image" ] && has_image=true
                 continue ;;
