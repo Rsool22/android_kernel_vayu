@@ -1248,7 +1248,10 @@ do_build() {
     local _scmver_created=false
     local _scmver_backup=""
     if [ -n "$KERNEL_NAME" ]; then
-        _make_localver=("LOCALVERSION=-${KERNEL_NAME}")
+        _make_localver=(
+            "LOCALVERSION=-${KERNEL_NAME}"
+            "CONFIG_LOCALVERSION="
+        )
         _scmver_backup=$(cat "${kernel_dir}/.scmversion" 2>/dev/null || true)
         printf '' > "${kernel_dir}/.scmversion"
         _scmver_created=true
