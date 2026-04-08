@@ -135,3 +135,18 @@ Android.bp
 out
 KernelSU/
 build.log
+
+# Toolchain
+clang/
+
+# AnyKernel3 & build output
+AnyKernel3/
+Anykernel-Builds/
+out/
+
+# Build script state files
+.builder_state
+.builder_prev_state
+.menuconfig_saved_config
+.build_number
+.scmversion
