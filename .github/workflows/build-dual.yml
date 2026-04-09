@@ -1,0 +1,158 @@
+name: Build Vayu Kernel (DEV + MAIN)
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual build'
+        required: false
+        default: 'Manual trigger'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # ── Check both branches for updates ────────────────────────────────────────
+  check-updates:
+    name: Check ReSukiSU for updates (dev + main)
+    runs-on: ubuntu-latest
+    outputs:
+      has_updates: ${{ steps.compare.outputs.has_updates }}
+      dev_sha: ${{ steps.shas.outputs.dev_sha }}
+      main_sha: ${{ steps.shas.outputs.main_sha }}
+    steps:
+      - name: Get current ReSukiSU SHAs
+        id: shas
+        run: |
+          DEV=$(git ls-remote https://github.com/ReSukiSU/ReSukiSU.git refs/heads/dev | cut -f1)
+          MAIN=$(git ls-remote https://github.com/ReSukiSU/ReSukiSU.git refs/heads/main | cut -f1)
+          echo "dev_sha=${DEV}"   >> $GITHUB_OUTPUT
+          echo "main_sha=${MAIN}" >> $GITHUB_OUTPUT
+          echo "  [CI] dev SHA:  ${DEV}"
+          echo "  [CI] main SHA: ${MAIN}"
+
+      - name: Restore last built SHA cache
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .last_ksu_shas
+          key: ksu-dual-${{ steps.shas.outputs.dev_sha }}-${{ steps.shas.outputs.main_sha }}
+          restore-keys: ksu-dual-
+
+      - name: Determine if build is needed
+        id: compare
+        run: |
+          if [ "${{ steps.cache.outputs.cache-hit }}" = "true" ] && \
+             [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "has_updates=false" >> $GITHUB_OUTPUT
+            echo "  [CI] No new commits on either branch -- skipping build."
+          else
+            echo "has_updates=true" >> $GITHUB_OUTPUT
+          fi
+
+  # ── Build matrix (dev + main in parallel) ──────────────────────────────────
+  build:
+    name: Build [${{ matrix.ksu_branch }}]
+    needs: check-updates
+    if: needs.check-updates.outputs.has_updates == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ksu_branch: [dev, main]
+      fail-fast: false
+    env:
+      KSU_BRANCH: ${{ matrix.ksu_branch }}
+
+    steps:
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex libssl-dev libelf-dev \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            python3 zip curl wget make
+
+      - name: Download ZyC Clang 23.x
+        run: bash .github/scripts/fetch_clang.sh
+
+      - name: Setup ReSukiSU driver (${{ matrix.ksu_branch }} branch)
+        run: |
+          bash <(curl -LSs https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh) ${{ matrix.ksu_branch }}
+
+      - name: Apply KSU hook guards
+        run: |
+          KERNEL_DIR="${GITHUB_WORKSPACE}" python3 scripts/apply_ksu_guards.py
+
+      - name: Build kernel
+        run: |
+          chmod +x .github/scripts/ci_build.sh
+          bash .github/scripts/ci_build.sh
+
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ matrix.ksu_branch }}
+          path: Anykernel-Builds/*.zip
+          retention-days: 1
+
+  # ── Create single release with both zips ───────────────────────────────────
+  release:
+    name: Create Combined Release
+    needs: [check-updates, build]
+    if: needs.check-updates.outputs.has_updates == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download DEV zip
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-dev
+          path: release/
+
+      - name: Download MAIN zip
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-main
+          path: release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dual-build-${{ github.run_number }}
+          name: "VAYU Dual Build #${{ github.run_number }} (${{ github.event_name == 'schedule' && 'Scheduled' || 'Manual' }})"
+          body: |
+            ## VAYU Kernel — AnyMore Project
+            **Build:** #${{ github.run_number }}
+            **Trigger:** ${{ github.event_name == 'schedule' && 'Scheduled (daily)' || inputs.reason }}
+
+            ### Packages
+            | Branch | Features |
+            |--------|----------|
+            | 🟡 DEV  | ReSukiSU DEV + SuSFS Inline Hook + KPM |
+            | 🟢 MAIN | ReSukiSU MAIN + SuSFS Inline Hook + KPM |
+
+            ### Installation
+            Flash the zip matching your preference via recovery. Requires Android 16.
+          files: release/*.zip
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Save SHA cache after successful release ─────────────────────────────────
+  save-cache:
+    name: Save ReSukiSU SHA cache
+    needs: [check-updates, release]
+    if: needs.check-updates.outputs.has_updates == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Save combined SHA cache
+        uses: actions/cache/save@v4
+        with:
+          path: .last_ksu_shas
+          key: ksu-dual-${{ needs.check-updates.outputs.dev_sha }}-${{ needs.check-updates.outputs.main_sha }}
