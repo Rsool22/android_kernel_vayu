@@ -36,22 +36,50 @@ jobs:
 
       - name: Get ReSukiSU driver version
         id: ksu_ver
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Read the numeric driver version (e.g. 34784) from kernel/Makefile.
-          # This is the real KSU driver version shown in the Manager app,
-          # NOT the git tag (e.g. 4.1.0) which is the Manager APK version.
-          VER=$(curl -sf \
-            "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/Makefile" \
-            | grep -m1 'KSU_VERSION' | grep -oP '\d+' | head -1 || true)
-          # Fallback to tag name if Makefile parse fails
+          # The driver version (e.g. 34784) is computed inside kernel/Makefile as:
+          #   KSU_VERSION := $(shell expr $(shell git rev-list --count HEAD) + OFFSET)
+          # grep -oP '\d+' on that line only extracts the static OFFSET, not the
+          # real value.  Fix: count commits via the GitHub pagination Link header
+          # and add the offset parsed from the same Makefile line.
+
+          MAKEFILE=$(curl -sf \
+            "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/Makefile" || true)
+
+          # ── Case 1: version is a plain integer literal ─────────────────────
+          VER=$(echo "$MAKEFILE" \
+            | grep -m1 'KSU_VERSION' \
+            | grep -oP ':=\s*\K[0-9]{4,}' || true)
+
+          # ── Case 2: dynamic expression  $(shell expr ... + OFFSET) ─────────
           if [ -z "$VER" ]; then
-            VER=$(curl -sf "https://api.github.com/repos/ReSukiSU/ReSukiSU/tags" \
-              | python3 -c "
-          import sys, json
-          tags = json.load(sys.stdin)
-          print(tags[0]['name'] if tags else 'unknown')
-          " 2>/dev/null || echo "unknown")
+            OFFSET=$(echo "$MAKEFILE" \
+              | grep -m1 'KSU_VERSION' \
+              | grep -oP '\+\s*\K[0-9]+' || true)
+            OFFSET="${OFFSET:-0}"
+
+            # Commit count via pagination: the Link header in a per_page=1 request
+            # contains  rel="last" with page=N where N == total commit count.
+            COUNT=$(curl -sf -I \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              "https://api.github.com/repos/ReSukiSU/ReSukiSU/commits?per_page=1&sha=main" \
+              | tr -d '\r' \
+              | grep -i '^link:' \
+              | grep -oP 'page=\K[0-9]+(?=>; rel="last")' || true)
+
+            if [ -n "$COUNT" ] && [ "$COUNT" -gt 0 ] 2>/dev/null; then
+              VER=$(( COUNT + OFFSET ))
+            fi
           fi
+
+          # ── Last resort: warn clearly — never silently use the APK tag ──────
+          if [ -z "$VER" ] || [ "$VER" = "0" ]; then
+            echo "  [CI] WARNING: Could not determine driver version; falling back to 'unknown'."
+            VER="unknown"
+          fi
+
           echo "ksu_version=${VER}" >> $GITHUB_OUTPUT
           echo "  [CI] ReSukiSU driver version: ${VER}"
 
@@ -105,9 +133,6 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.ccache
-          # Key includes defconfig hash so a config change busts the cache.
-          # Run-number suffix lets us always write a new entry while still
-          # restoring the closest prior match via restore-keys fallback.
           key: ccache-${{ matrix.ksu_branch }}-${{ hashFiles('arch/arm64/configs/vayu_defconfig') }}-${{ github.run_number }}
           restore-keys: |
             ccache-${{ matrix.ksu_branch }}-${{ hashFiles('arch/arm64/configs/vayu_defconfig') }}-
@@ -179,39 +204,46 @@ jobs:
         run: |
           mkdir -p release/
 
-          # ReSukiSU manager builds are triggered by pushes to main only.
-          # Searching per-branch means the dev query finds nothing and MAIN
-          # zips are never downloaded.
-          # Fix: find the single latest successful push run that produced
-          # manager artifacts, download once, and copy for both DEV and MAIN.
+          # Manager artifacts are produced by push runs on each branch.
+          # We query separately per branch (main / dev) so that:
+          #   • only push-triggered runs on the correct branch are considered
+          #   • DEV and MAIN each get their own artifact, not a shared copy
 
-          WANTED=(
+          ARTIFACT_NAMES=(
             "Manager-release|ReSukiSU-Manager"
             "Spoofed-Manager-release|ReSukiSU-Spoofed-Manager"
           )
 
-          echo "  [CI] Finding latest successful ReSukiSU push run..."
-          RUN_ID=$(curl -sf \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/ReSukiSU/ReSukiSU/actions/runs?event=push&status=success&per_page=20" \
-            | python3 -c "
+          for BRANCH_TAG in DEV MAIN; do
+            BRANCH_LC="${BRANCH_TAG,,}"   # "DEV" → "dev", "MAIN" → "main"
+
+            echo ""
+            echo "  [CI] ── ${BRANCH_TAG} manager ────────────────────────────────"
+            echo "  [CI] Searching latest successful push run on '${BRANCH_LC}' branch..."
+
+            RUN_ID=$(curl -sf \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/ReSukiSU/ReSukiSU/actions/runs?event=push&status=success&branch=${BRANCH_LC}&per_page=10" \
+              | python3 -c "
           import sys, json
           for r in json.load(sys.stdin).get('workflow_runs', []):
               print(r['id']); break
-          ")
+          " || true)
 
-          if [ -z "$RUN_ID" ]; then
-            echo "  [CI] No successful push run found -- skipping managers."
-          else
-            echo "  [CI] Using run ${RUN_ID} for manager artifacts."
+            if [ -z "$RUN_ID" ]; then
+              echo "  [CI] No successful push run found for branch '${BRANCH_LC}' -- skipping ${BRANCH_TAG} managers."
+              continue
+            fi
+
+            echo "  [CI] Using run ${RUN_ID} for ${BRANCH_TAG} manager artifacts."
 
             ARTIFACTS_JSON=$(curl -sf \
               -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
               "https://api.github.com/repos/ReSukiSU/ReSukiSU/actions/runs/${RUN_ID}/artifacts")
 
-            for ENTRY in "${WANTED[@]}"; do
+            for ENTRY in "${ARTIFACT_NAMES[@]}"; do
               ARTIFACT_NAME="${ENTRY%%|*}"
               OUT_BASE="${ENTRY##*|}"
 
@@ -221,29 +253,23 @@ jobs:
           for a in json.load(sys.stdin).get('artifacts', []):
               if a['name'] == target:
                   print(a['id']); break
-          ")
+          " || true)
 
               if [ -z "$ARTIFACT_ID" ]; then
                 echo "  [CI] '${ARTIFACT_NAME}' absent from run ${RUN_ID} -- skipping."
                 continue
               fi
 
-              # Download once into a temp file, then copy for DEV and MAIN
-              TMP_FILE="/tmp/${OUT_BASE}.zip"
-              echo "  [CI] Downloading '${ARTIFACT_NAME}'..."
+              OUT_FILE="release/${OUT_BASE}-${BRANCH_TAG}.zip"
+              echo "  [CI] Downloading '${ARTIFACT_NAME}' → ${OUT_FILE}..."
               curl -LSs \
                 -H "Authorization: Bearer ${GH_TOKEN}" \
                 -H "Accept: application/vnd.github+json" \
-                -o "${TMP_FILE}" \
+                -o "${OUT_FILE}" \
                 "https://api.github.com/repos/ReSukiSU/ReSukiSU/actions/artifacts/${ARTIFACT_ID}/zip"
-
-              for BRANCH_TAG in DEV MAIN; do
-                OUT_FILE="release/${OUT_BASE}-${BRANCH_TAG}.zip"
-                cp "${TMP_FILE}" "${OUT_FILE}"
-                echo "  [CI] Saved: ${OUT_FILE} ($(du -h "${OUT_FILE}" | cut -f1))"
-              done
+              echo "  [CI] Saved: ${OUT_FILE} ($(du -h "${OUT_FILE}" | cut -f1))"
             done
-          fi
+          done
 
           echo ""
           echo "  [CI] Release folder contents:"
