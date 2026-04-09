@@ -1,0 +1,80 @@
+name: Build Vayu Kernel
+
+on:
+  schedule:
+    # Runs daily at 02:00 UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual build'
+        required: false
+        default: 'Manual trigger'
+
+jobs:
+  build:
+    name: Build ReSukiSU Kernel (DEV + SuSFS + KPM)
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── 2. Dependencies ──────────────────────────────────────────────────────
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex libssl-dev libelf-dev \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            python3 zip curl wget make
+
+      # ── 3. Clang ─────────────────────────────────────────────────────────────
+      - name: Download ZyC Clang 23.x
+        run: bash .github/scripts/fetch_clang.sh
+
+      # ── 4. KernelSU (ReSukiSU dev branch) ───────────────────────────────────
+      - name: Setup ReSukiSU driver (dev branch)
+        run: |
+          echo "  [CI] Running ReSukiSU setup.sh (dev)..."
+          bash <(curl -LSs https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh) dev
+
+      # ── 5. KSU hook guards ───────────────────────────────────────────────────
+      - name: Apply KSU hook guards
+        run: |
+          echo "  [CI] Running apply_ksu_guards.py..."
+          KERNEL_DIR="${GITHUB_WORKSPACE}" python3 scripts/apply_ksu_guards.py
+
+      # ── 6. Build ─────────────────────────────────────────────────────────────
+      - name: Build kernel
+        run: |
+          chmod +x .github/scripts/ci_build.sh
+          bash .github/scripts/ci_build.sh
+
+      # ── 7. Release ───────────────────────────────────────────────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: "VAYU Build #${{ github.run_number }} (${{ github.event_name == 'schedule' && 'Scheduled' || 'Manual' }})"
+          body: |
+            ## VAYU Kernel — AnyMore Project
+            **Build:** #${{ github.run_number }}
+            **Date:** ${{ github.event.repository.updated_at }}
+            **Trigger:** ${{ github.event_name == 'schedule' && 'Scheduled (daily)' || inputs.reason }}
+
+            ### Features
+            - ✅ ReSukiSU (DEV branch)
+            - ✅ SuSFS v2.1.0 — Inline Hook
+            - ✅ KPM
+            - ⏱ Build time: ${{ env.ELAPSED }}
+
+            ### Installation
+            Flash via recovery. Requires Android 16.
+          files: Anykernel-Builds/*.zip
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
