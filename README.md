@@ -37,9 +37,9 @@
 
 | Item | Minimum |
 |------|---------|
-| OS | Linux (Ubuntu 22.04+ recommended) |
+| OS | Linux (Ubuntu 22.04+ IS Recommended) |
 | Shell | Bash 4.x+ |
-| RAM | 8 GB (16 GB recommended) |
+| RAM | 8 GB (16 GB Is recommended) |
 | Disk | 30 GB free (kernel source + toolchain + out/) |
 | Arch | x86\_64 host |
 | Python | python3 (for GitHub API queries) |
@@ -158,9 +158,9 @@ The script runs the official `setup.sh` from [ReSukiSU/ReSukiSU](https://github.
 
 ---
 
-### 4. Clone AnyKernel3
+### 4. AnyKernel3
 
-The script packages the kernel using [AnyKernel3](https://github.com/osm0sis/AnyKernel3). Clone it into the default location or configure a custom path via **[S] Setup → [P] Paths → [3]**:
+The script packages the kernel using [AnyKernel3](https://github.com/osm0sis/AnyKernel3). The  Repo already has it included or you can Clone it either to the default location or configure a custom path via **[S] Setup → [P] Paths → [3]**:
 
 ```bash
 git clone https://github.com/osm0sis/AnyKernel3 \
