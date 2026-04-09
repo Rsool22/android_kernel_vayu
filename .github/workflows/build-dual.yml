@@ -1,0 +1,326 @@
+name: Vayu-AnyMore ReSukiSU+SuSFS+KPM (DEV&MAIN)
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual build'
+        required: false
+        default: 'Manual trigger'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true   # silences Node 20 deprecation warnings
+
+jobs:
+  # ── Check both branches for updates ────────────────────────────────────────
+  check-updates:
+    name: Check ReSukiSU for updates (dev + main)
+    runs-on: ubuntu-latest
+    outputs:
+      has_updates: ${{ steps.compare.outputs.has_updates }}
+      dev_sha:     ${{ steps.shas.outputs.dev_sha }}
+      main_sha:    ${{ steps.shas.outputs.main_sha }}
+    steps:
+      - name: Get current ReSukiSU SHAs
+        id: shas
+        run: |
+          DEV=$(git ls-remote https://github.com/ReSukiSU/ReSukiSU.git refs/heads/dev | cut -f1)
+          MAIN=$(git ls-remote https://github.com/ReSukiSU/ReSukiSU.git refs/heads/main | cut -f1)
+          echo "dev_sha=${DEV}"   >> $GITHUB_OUTPUT
+          echo "main_sha=${MAIN}" >> $GITHUB_OUTPUT
+          echo "  [CI] dev SHA:  ${DEV}"
+          echo "  [CI] main SHA: ${MAIN}"
+
+      - name: Restore last built SHA cache
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .last_ksu_shas
+          key: ksu-dual-${{ steps.shas.outputs.dev_sha }}-${{ steps.shas.outputs.main_sha }}
+          restore-keys: ksu-dual-
+
+      - name: Determine if build is needed
+        id: compare
+        run: |
+          if [ "${{ steps.cache.outputs.cache-hit }}" = "true" ] && \
+             [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "has_updates=false" >> $GITHUB_OUTPUT
+            echo "  [CI] No new commits on either branch -- skipping build."
+          else
+            echo "has_updates=true" >> $GITHUB_OUTPUT
+          fi
+
+  # ── Build matrix (dev + main in parallel) ──────────────────────────────────
+  build:
+    name: Build [${{ matrix.ksu_branch }}]
+    needs: check-updates
+    if: needs.check-updates.outputs.has_updates == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ksu_branch: [dev, main]
+      fail-fast: false
+    env:
+      KSU_BRANCH: ${{ matrix.ksu_branch }}
+
+    steps:
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex libssl-dev libelf-dev \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            python3 zip curl wget make ccache
+
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ matrix.ksu_branch }}-${{ hashFiles('arch/arm64/configs/vayu_defconfig') }}-${{ github.run_number }}
+          restore-keys: |
+            ccache-${{ matrix.ksu_branch }}-${{ hashFiles('arch/arm64/configs/vayu_defconfig') }}-
+            ccache-${{ matrix.ksu_branch }}-
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=2G
+          ccache --set-config=compiler_check=content
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=1
+          ccache -z
+          echo "CCACHE_DIR=${HOME}/.ccache" >> $GITHUB_ENV
+
+      - name: Download ZyC Clang 23.x
+        run: bash .github/scripts/fetch_clang.sh
+
+      - name: Setup ReSukiSU driver (${{ matrix.ksu_branch }} branch)
+        run: |
+          bash <(curl -LSs https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh) ${{ matrix.ksu_branch }}
+
+      - name: Apply KSU hook guards
+        run: |
+          KERNEL_DIR="${GITHUB_WORKSPACE}" python3 scripts/apply_ksu_guards.py
+
+      - name: Build kernel
+        env:
+          BUILD_COUNTER_OFFSET: ${{ vars.BUILD_COUNTER_OFFSET }}
+        run: |
+          chmod +x .github/scripts/ci_build.sh
+          bash .github/scripts/ci_build.sh
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ matrix.ksu_branch }}-${{ hashFiles('arch/arm64/configs/vayu_defconfig') }}-${{ github.run_number }}
+
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ matrix.ksu_branch }}
+          path: |
+            Anykernel-Builds/*.zip
+            Anykernel-Builds/ksu_version_*.txt
+          retention-days: 1
+
+  # ── Create single release with both zips ───────────────────────────────────
+  release:
+    name: Create Combined Release
+    needs: [check-updates, build]
+    if: needs.check-updates.outputs.has_updates == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download DEV zip
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-dev
+          path: release/
+
+      - name: Download MAIN zip
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-main
+          path: release/
+
+      - name: Download ReSukiSU Manager Artifacts (dev + main)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p release/
+
+          # Use the artifacts-by-name API endpoint instead of searching runs.
+          # This queries all artifacts named "Manager-release" (or "Spoofed-...")
+          # across the whole repo, then filters by workflow_run.head_branch.
+          # This is robust against runs that don't produce manager artifacts —
+          # the API skips straight to the most recent artifact that actually
+          # exists on the target branch, regardless of which run made it.
+
+          ARTIFACT_NAMES=(
+            "Manager-release|ReSukiSU-Manager"
+            "Spoofed-Manager-release|ReSukiSU-Spoofed-Manager"
+          )
+
+          for BRANCH_TAG in DEV MAIN; do
+            BRANCH_LC="${BRANCH_TAG,,}"   # "DEV" → "dev", "MAIN" → "main"
+
+            echo ""
+            echo "  [CI] ── ${BRANCH_TAG} manager ────────────────────────────────"
+
+            for ENTRY in "${ARTIFACT_NAMES[@]}"; do
+              ARTIFACT_NAME="${ENTRY%%|*}"
+              OUT_BASE="${ENTRY##*|}"
+              OUT_FILE="release/${OUT_BASE}-${BRANCH_TAG}.zip"
+
+              echo "  [CI] Looking for '${ARTIFACT_NAME}' on branch '${BRANCH_LC}'..."
+
+              ARTIFACT_ID=$(curl -sf \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/ReSukiSU/ReSukiSU/actions/artifacts?name=${ARTIFACT_NAME}&per_page=20" \
+                | python3 -c "
+          import sys, json
+          branch = '${BRANCH_LC}'
+          for a in json.load(sys.stdin).get('artifacts', []):
+              wr = a.get('workflow_run') or {}
+              if wr.get('head_branch') == branch and not a.get('expired', False):
+                  print(a['id']); break
+          " || true)
+
+              if [ -z "$ARTIFACT_ID" ]; then
+                echo "  [CI] No non-expired '${ARTIFACT_NAME}' found on branch '${BRANCH_LC}' -- skipping."
+                continue
+              fi
+
+              echo "  [CI] Downloading '${ARTIFACT_NAME}' (id=${ARTIFACT_ID}) → ${OUT_FILE}..."
+              curl -LSs \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                -o "${OUT_FILE}" \
+                "https://api.github.com/repos/ReSukiSU/ReSukiSU/actions/artifacts/${ARTIFACT_ID}/zip"
+              echo "  [CI] Saved: ${OUT_FILE} ($(du -h "${OUT_FILE}" | cut -f1))"
+            done
+          done
+
+          echo ""
+          echo "  [CI] Release folder contents:"
+          ls -lh release/
+
+      - name: Read ReSukiSU version codes from build artifacts
+        run: |
+          MAIN_VER=$(cat release/ksu_version_MAIN.txt 2>/dev/null | tr -d '[:space:]' || echo "unknown")
+          DEV_VER=$(cat  release/ksu_version_DEV.txt  2>/dev/null | tr -d '[:space:]' || echo "unknown")
+          echo "  [CI] Driver versions -- MAIN: ${MAIN_VER}  DEV: ${DEV_VER}"
+          echo "MAIN_KSU_VERSION=${MAIN_VER}" >> $GITHUB_ENV
+          echo "DEV_KSU_VERSION=${DEV_VER}"   >> $GITHUB_ENV
+          # Formatted date for the release body (github.run_started_at is unavailable here)
+          echo "RELEASE_DATE=$(date -u '+%Y-%m-%d %H:%M UTC')" >> $GITHUB_ENV
+
+      - name: Publish Rolling Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Delete the existing 'latest' release and its tag so we can recreate
+          # it fresh. This keeps one single release that updates every build
+          # instead of accumulating a new release per run.
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          sleep 3   # give GitHub time to process the deletion
+
+          # Write release notes to a file (heredoc avoids quoting nightmares)
+          cat > /tmp/release_notes.md << 'NOTES'
+          ## Vayu-Anymore Kernel — ReSukiSU Edition
+
+          > Custom kernel for the **Xiaomi Poco X3 Pro (vayu)** with full root, SUSFS stealth, and KernelPatch Module support.
+
+          ---
+
+          ### 🔧 Build Info
+          | Property | Value |
+          |----------|-------|
+          | **Build** | #BUILD_NUM |
+          | **Date** | RELEASE_DATE |
+          | **Trigger** | TRIGGER |
+          | **ReSukiSU Drivers — MAIN** | `MAIN_VER` |
+          | **ReSukiSU Drivers — DEV** | `DEV_VER` |
+          | **Kernel** | 4.14 nonGKI · arm64 |
+          | **Compiler** | ZyC Clang 23.x · LLVM/LLD |
+          | **Features** | ReSukiSU · SUSFS Inline Hook · KPM |
+
+          ---
+
+          ### 📦 Kernel Packages
+          Flash **one** of these via recovery — pick the branch you want to track.
+
+          | File | Branch | Driver Version |
+          |------|--------|---------------|
+          | `*MAIN*.zip` | 🟢 MAIN — stable | `MAIN_VER` |
+          | `*DEV*.zip`  | 🟡 DEV — latest features | `DEV_VER` |
+
+          ---
+
+          ### 📱 Manager APKs
+          > Bundled from the latest ReSukiSU CI push on the matching branch.
+          > Each zip contains the APK — extract and install directly.
+
+          | File | Branch | Variant |
+          |------|--------|---------|
+          | `ReSukiSU-Manager-MAIN.zip`         | 🟢 MAIN | Standard |
+          | `ReSukiSU-Spoofed-Manager-MAIN.zip` | 🟢 MAIN | Spoofed (GMS bypass) |
+          | `ReSukiSU-Manager-DEV.zip`          | 🟡 DEV  | Standard |
+          | `ReSukiSU-Spoofed-Manager-DEV.zip`  | 🟡 DEV  | Spoofed (GMS bypass) |
+
+          ---
+
+          ### ⚡ Installation Guide
+
+          **Requirements**
+          - Xiaomi Poco X3 Pro (codename: `vayu`)
+          - Custom recovery — [Click Here to Download OrangeFox Recovery for Vayu](https://orangefox.download/device/61310755bb6a91af6a656d0d)
+          - Android 16
+          - Official DTBO for the Android 16 firmware this kernel source targets
+          - Unlocked bootloader
+
+          **Steps**
+          1. Boot into recovery.
+          2. Flash the kernel zip matching your preferred branch (`MAIN` = stable, `DEV` = latest).
+          3. Extract the matching Manager zip and install the APK.
+          4. Reboot — grant root access via the ReSukiSU Manager when prompted.
+
+          > ⚠️ **Spoofed Manager** is only needed if your device/ROM fails SafetyNet/Play Integrity checks with the standard manager. Use standard unless you have a specific reason.
+          NOTES
+
+          # Substitute placeholder tokens with actual values
+          TRIGGER="${{ github.event_name == 'schedule' && 'Scheduled (daily)' || inputs.reason }}"
+          sed -i \
+            -e "s|BUILD_NUM|${{ github.run_number }}|g" \
+            -e "s|RELEASE_DATE|${RELEASE_DATE}|g" \
+            -e "s|TRIGGER|${TRIGGER}|g" \
+            -e "s|MAIN_VER|${MAIN_KSU_VERSION}|g" \
+            -e "s|DEV_VER|${DEV_KSU_VERSION}|g" \
+            /tmp/release_notes.md
+
+          gh release create latest \
+            --title "Vayu-Anymore Kernel ReSukiSU Edition [main:${MAIN_KSU_VERSION} / dev:${DEV_KSU_VERSION}]" \
+            --notes-file /tmp/release_notes.md \
+            --latest \
+            release/*.zip
+
+  # ── Save SHA cache after successful release ─────────────────────────────────
+  save-cache:
+    name: Save ReSukiSU SHA cache
+    needs: [check-updates, release]
+    if: needs.check-updates.outputs.has_updates == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Save combined SHA cache
+        uses: actions/cache/save@v4
+        with:
+          path: .last_ksu_shas
+          key: ksu-dual-${{ needs.check-updates.outputs.dev_sha }}-${{ needs.check-updates.outputs.main_sha }}
