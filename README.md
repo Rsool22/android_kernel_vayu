@@ -46,7 +46,7 @@
 
 Pre-built flashable zips are published automatically by the GitHub Actions CI workflow after every successful build. No compilation required — just download and flash via [OrangeFox Recovery](https://orangefox.download/device/61310755bb6a91af6a656d0d) or any AnyKernel3-compatible recovery.
 
-**[→ Download Latest Release](https://github.com/Rsool22/android_kernel_xiaomi_vayu/releases/latest)**
+**[→ Download Latest Release](https://github.com/Rsool22/android_kernel_vayu/releases/latest)**
 
 > The release page always contains exactly one release (rolling `latest` strategy). The previous release is replaced on every successful CI run, so the link above always points to the most recent build.
 
