@@ -9,7 +9,7 @@
 [![Last Commit](https://img.shields.io/github/last-commit/Rsool22/android_kernel_vayu/16?style=for-the-badge&logo=git&logoColor=white)](https://github.com/Rsool22/android_kernel_vayu/commits/16)
 [![License](https://img.shields.io/badge/License-GPL--2.0-blue?style=for-the-badge&logo=gnu&logoColor=white)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)
 
-[![Kernel](https://img.shields.io/badge/Kernel-Linux%204.14%20NonGKI-orange?style=for-the-badge&logo=linux&logoColor=white)](https://kernel.org/)
+[![AnyMore-Kernel](https://img.shields.io/badge/Kernel-Linux%204.14%20NonGKI-orange?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/AnymoreProject/android_kernel_vayu)
 [![Android](https://img.shields.io/badge/Android-16-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com/)
 [![Device](https://img.shields.io/badge/Device-Poco%20X3%20Pro%20(vayu)-9B59B6?style=for-the-badge)](https://m.gsmarena.com/xiaomi_poco_x3_pro-10802.php)
 [![ReSukiSU](https://img.shields.io/badge/ReSukiSU-Kernel%20Root-red?style=for-the-badge)](https://github.com/ReSukiSU/ReSukiSU)
