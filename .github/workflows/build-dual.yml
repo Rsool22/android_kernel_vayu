@@ -27,30 +27,30 @@ jobs:
     name: Reset build counter
     if: github.event_name == 'workflow_dispatch' && inputs.reset_counter == true
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Set BUILD_COUNTER_OFFSET so next release shows #1
-        env:
-          # GITHUB_TOKEN cannot manage repository variables (HTTP 403).
-          # Use a fine-grained PAT with "Variables: Read and write" permission.
-          GH_TOKEN: ${{ secrets.VARIABLES_PAT }}
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 1
+
+      - name: Write offset file and push
         run: |
           # Offset = run_number - 1  →  display = run_number - offset = 1
           OFFSET=$(( ${{ github.run_number }} - 1 ))
           echo "  [CI] Resetting build counter: run #${{ github.run_number }} will display as #1 (offset=${OFFSET})"
 
-          # PATCH updates an existing variable; POST creates it if absent
-          gh api \
-            --method PATCH \
-            -H "Accept: application/vnd.github+json" \
-            "/repos/${{ github.repository }}/actions/variables/BUILD_COUNTER_OFFSET" \
-            -f "value=${OFFSET}" 2>/dev/null \
-          || \
-          gh api \
-            --method POST \
-            -H "Accept: application/vnd.github+json" \
-            "/repos/${{ github.repository }}/actions/variables" \
-            -f "name=BUILD_COUNTER_OFFSET" \
-            -f "value=${OFFSET}"
+          echo "${OFFSET}" > .build_counter_offset
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .build_counter_offset
+          git diff --cached --quiet \
+            && echo "  [CI] No change needed." \
+            || git commit -m "ci: reset build counter (offset=${OFFSET}) [skip ci]"
+          git push
 
           echo "  [CI] BUILD_COUNTER_OFFSET set to ${OFFSET} ✓"
 
@@ -165,7 +165,7 @@ jobs:
 
       - name: Compute display build number
         run: |
-          OFFSET="${{ vars.BUILD_COUNTER_OFFSET }}"
+          OFFSET=$(cat .build_counter_offset 2>/dev/null | tr -d '[:space:]' || echo "0")
           NUM=$(( ${{ github.run_number }} - ${OFFSET:-0} ))
           [ "$NUM" -lt 1 ] && NUM=1
           echo "  [CI] Run #${{ github.run_number }} → Display build #${NUM} (offset=${OFFSET:-0})"
@@ -173,7 +173,6 @@ jobs:
 
       - name: Build kernel
         env:
-          BUILD_COUNTER_OFFSET: ${{ vars.BUILD_COUNTER_OFFSET }}
           DISPLAY_BUILD_NUM: ${{ env.DISPLAY_BUILD_NUM }}
         run: |
           chmod +x .github/scripts/ci_build.sh
@@ -327,7 +326,7 @@ jobs:
 
       - name: Compute display build number
         run: |
-          OFFSET="${{ vars.BUILD_COUNTER_OFFSET }}"
+          OFFSET=$(cat .build_counter_offset 2>/dev/null | tr -d '[:space:]' || echo "0")
           NUM=$(( ${{ github.run_number }} - ${OFFSET:-0} ))
           [ "$NUM" -lt 1 ] && NUM=1
           echo "  [CI] Run #${{ github.run_number }} → Display build #${NUM} (offset=${OFFSET:-0})"
