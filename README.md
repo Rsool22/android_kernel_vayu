@@ -11,7 +11,7 @@
 
 [![Kernel](https://img.shields.io/badge/Kernel-Linux%204.14%20NonGKI-orange?style=for-the-badge&logo=linux&logoColor=white)](https://kernel.org/)
 [![Android](https://img.shields.io/badge/Android-16-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com/)
-[![Device](https://img.shields.io/badge/Device-Poco%20X3%20Pro%20(vayu)-9B59B6?style=for-the-badge)](https://www.gsmarena.com/xiaomi_poco_x3_pro-10611.php)
+[![Device](https://img.shields.io/badge/Device-Poco%20X3%20Pro%20(vayu)-9B59B6?style=for-the-badge)](https://m.gsmarena.com/xiaomi_poco_x3_pro-10802.php)
 [![ReSukiSU](https://img.shields.io/badge/ReSukiSU-Kernel%20Root-red?style=for-the-badge)](https://github.com/ReSukiSU/ReSukiSU)
 
 </div>
