@@ -450,7 +450,7 @@ The release job searches the last 30 push-triggered upstream runs. If all 30 hav
 | Resource | URL |
 |----------|-----|
 | ReSukiSU | https://github.com/ReSukiSU/ReSukiSU |
-| ReSukiSU Documentation | https://resukisu.github.io |
+| ReSukiSU Documentation | https://github.com/ReSukiSU/ReSukiSU/blob/main/README.md |
 | SUSFS for KSU | https://gitlab.com/simonpunk/susfs4ksu |
 | ZyC Clang releases | https://github.com/ZyCromerZ/Clang/releases |
 | AnyKernel3 | https://github.com/osm0sis/AnyKernel3 |
