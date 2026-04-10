@@ -1,6 +1,6 @@
 <div align="center">
 
-# android\_kernel\_vayu
+# 🐧 android\_kernel\_vayu
 
 **Linux 4.14 · NonGKI · Android 16 · Xiaomi Poco X3 Pro**
 
@@ -13,58 +13,6 @@
 [![Android](https://img.shields.io/badge/Android-16-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com/)
 [![Device](https://img.shields.io/badge/Device-Poco%20X3%20Pro%20(vayu)-9B59B6?style=for-the-badge)](https://www.gsmarena.com/xiaomi_poco_x3_pro-10611.php)
 [![ReSukiSU](https://img.shields.io/badge/ReSukiSU-v4.1.0-red?style=for-the-badge)](https://github.com/ReSukiSU/ReSukiSU)
-
-**[→ Download Latest Release](https://github.com/Rsool22/android_kernel_vayu/releases/latest)**
-
-</div>
-
----
-
-Custom kernel source for the Poco X3 Pro (`vayu`, SM8150) based on the [AnymoreProject](https://github.com/AnymoreProject) 4.14 tree targeting Android 16. Ships with ReSukiSU v4.1.0, SUSFS v2.1.0 in inline-hook mode, and KPM support — all working on a non-GKI 4.14 kernel using manual source hooks, which is the correct and recommended approach for this architecture.
-
-Includes an interactive `build.sh` TUI and a GitHub Actions CI pipeline that builds both the ReSukiSU `main` and `dev` branches in parallel and publishes a rolling release automatically.
-
-> [!WARNING]
-> **Disclaimer:** Flashing custom kernels may void your device warranty. I am not responsible for bricked devices, bootloops, data loss, or any other damage. Always back up your data before flashing. **You do this at your own risk.**
-
----
-
-## Table of Contents
-
-- [Features](#features)
-- [Download](#download)
-- [Building Locally](#building-locally)
-- [build.sh Reference](#buildsh-reference)
-- [Docker Support](#docker-support)
-- [Droidspaces / LXC Container Support](#droidspaces--lxc-container-support)
-- [GitHub Actions CI](#github-actions-ci)
-- [Troubleshooting](#troubleshooting)
-- [Credits](#credits)
-- [Reference Links](#reference-links)
-
----
-
-## Features
-
-### ReSukiSU v4.1.0
-
-<parameter name="file_text"><div align="center">
-
-# android\_kernel\_vayu
-
-**Linux 4.14 · NonGKI · Android 16 · Xiaomi Poco X3 Pro**
-
-[![Build Status](https://img.shields.io/github/actions/workflow/status/Rsool22/android_kernel_vayu/build-dual.yml?branch=16&style=for-the-badge&logo=github-actions&logoColor=white&label=CI)](https://github.com/Rsool22/android_kernel_vayu/actions/workflows/build-dual.yml)
-[![Latest Release](https://img.shields.io/github/v/release/Rsool22/android_kernel_vayu?style=for-the-badge&logo=github&logoColor=white&label=Release)](https://github.com/Rsool22/android_kernel_vayu/releases/latest)
-[![Last Commit](https://img.shields.io/github/last-commit/Rsool22/android_kernel_vayu/16?style=for-the-badge&logo=git&logoColor=white)](https://github.com/Rsool22/android_kernel_vayu/commits/16)
-[![License](https://img.shields.io/badge/License-GPL--2.0-blue?style=for-the-badge&logo=gnu&logoColor=white)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)
-
-[![Kernel](https://img.shields.io/badge/Kernel-Linux%204.14%20NonGKI-orange?style=for-the-badge&logo=linux&logoColor=white)](https://kernel.org/)
-[![Android](https://img.shields.io/badge/Android-16-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com/)
-[![Device](https://img.shields.io/badge/Device-Poco%20X3%20Pro%20(vayu)-9B59B6?style=for-the-badge)](https://www.gsmarena.com/xiaomi_poco_x3_pro-10611.php)
-[![ReSukiSU](https://img.shields.io/badge/ReSukiSU-v4.1.0-red?style=for-the-badge)](https://github.com/ReSukiSU/ReSukiSU)
-
-**[→ Download Latest Release](https://github.com/Rsool22/android_kernel_vayu/releases/latest)**
 
 </div>
 
@@ -444,7 +392,7 @@ Verify the Manager APK branch matches the kernel zip you flashed. If it does, co
 Confirm `CONFIG_KSU_SUSFS=y` is set and `CONFIG_KSU_MANUAL_HOOK` is explicitly unset. Having both flags active simultaneously causes silent failures. Also confirm you are using the Spoofed Manager variant if your ROM enforces Play Integrity.
 
 **Hook mode confusion between MAIN and DEV builds**
-The MAIN and DEV kernel zips both use SUSFS Inline-Hook mode. The only difference is the ReSukiSU driver version (from the respective upstream branch). Match the Manager APK to the zip — do not mix branches.
+The MAIN and DEV kernel zips both use SUSFS Inline-Hook mode. The only difference is the ReSukiSU driver version from the respective upstream branch. Match the Manager APK to the zip — do not mix branches.
 
 **Incremental build locked**
 The ReSukiSU branch or hook mode changed since the last build. A full clean is required; the lock clears automatically once it completes.
