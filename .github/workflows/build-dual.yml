@@ -9,6 +9,11 @@ on:
         description: 'Reason for manual trigger'
         required: false
         default: 'Manual trigger'
+      reset_counter:
+        description: 'Reset the build number counter back to #1'
+        required: false
+        type: boolean
+        default: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true   # suppress Node 20 deprecation warnings
@@ -16,10 +21,46 @@ env:
 jobs:
 
   # ─────────────────────────────────────────────────────────────────────────────
+  # 0. Optionally reset the build number counter
+  # ─────────────────────────────────────────────────────────────────────────────
+  reset-counter:
+    name: Reset build counter
+    if: github.event_name == 'workflow_dispatch' && inputs.reset_counter == true
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Set BUILD_COUNTER_OFFSET so next release shows #1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Offset = run_number - 1  →  display = run_number - offset = 1
+          OFFSET=$(( ${{ github.run_number }} - 1 ))
+          echo "  [CI] Resetting build counter: run #${{ github.run_number }} will display as #1 (offset=${OFFSET})"
+
+          # PATCH updates an existing variable; POST creates it if absent
+          gh api \
+            --method PATCH \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/actions/variables/BUILD_COUNTER_OFFSET" \
+            -f "value=${OFFSET}" 2>/dev/null \
+          || \
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/actions/variables" \
+            -f "name=BUILD_COUNTER_OFFSET" \
+            -f "value=${OFFSET}"
+
+          echo "  [CI] BUILD_COUNTER_OFFSET set to ${OFFSET} ✓"
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # 1. Check both ReSukiSU branches for upstream changes
   # ─────────────────────────────────────────────────────────────────────────────
   check-updates:
     name: Check ReSukiSU for updates (main + dev)
+    needs: reset-counter
+    if: always()
     runs-on: ubuntu-latest
     outputs:
       has_updates: ${{ steps.compare.outputs.has_updates }}
@@ -122,9 +163,18 @@ jobs:
       - name: Apply KSU hook guards
         run: KERNEL_DIR="${GITHUB_WORKSPACE}" python3 scripts/apply_ksu_guards.py
 
+      - name: Compute display build number
+        run: |
+          OFFSET="${{ vars.BUILD_COUNTER_OFFSET }}"
+          NUM=$(( ${{ github.run_number }} - ${OFFSET:-0} ))
+          [ "$NUM" -lt 1 ] && NUM=1
+          echo "  [CI] Run #${{ github.run_number }} → Display build #${NUM} (offset=${OFFSET:-0})"
+          echo "DISPLAY_BUILD_NUM=${NUM}" >> $GITHUB_ENV
+
       - name: Build kernel
         env:
           BUILD_COUNTER_OFFSET: ${{ vars.BUILD_COUNTER_OFFSET }}
+          DISPLAY_BUILD_NUM: ${{ env.DISPLAY_BUILD_NUM }}
         run: |
           chmod +x .github/scripts/ci_build.sh
           bash .github/scripts/ci_build.sh
@@ -275,6 +325,14 @@ jobs:
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
           sleep 5   # allow GitHub time to propagate the deletion
 
+      - name: Compute display build number
+        run: |
+          OFFSET="${{ vars.BUILD_COUNTER_OFFSET }}"
+          NUM=$(( ${{ github.run_number }} - ${OFFSET:-0} ))
+          [ "$NUM" -lt 1 ] && NUM=1
+          echo "  [CI] Run #${{ github.run_number }} → Display build #${NUM} (offset=${OFFSET:-0})"
+          echo "DISPLAY_BUILD_NUM=${NUM}" >> $GITHUB_ENV
+
       - name: Write release notes
         run: |
           TRIGGER="${{ github.event_name == 'schedule' && 'Scheduled (daily at 03:00 UTC)' || inputs.reason }}"
@@ -378,11 +436,11 @@ jobs:
 
           # Substitute placeholder tokens with real values
           sed -i \
-            -e "s|BUILD_NUM|${{ github.run_number }}|g" \
-            -e "s|RELEASE_DATE|${RELEASE_DATE}|g"       \
-            -e "s|TRIGGER_VAL|${TRIGGER}|g"             \
-            -e "s|MAIN_VER|${MAIN_KSU_VERSION}|g"       \
-            -e "s|DEV_VER|${DEV_KSU_VERSION}|g"         \
+            -e "s|BUILD_NUM|${DISPLAY_BUILD_NUM}|g"      \
+            -e "s|RELEASE_DATE|${RELEASE_DATE}|g"        \
+            -e "s|TRIGGER_VAL|${TRIGGER}|g"              \
+            -e "s|MAIN_VER|${MAIN_KSU_VERSION}|g"        \
+            -e "s|DEV_VER|${DEV_KSU_VERSION}|g"          \
             /tmp/release_notes.md
 
       - name: Publish rolling release
@@ -390,7 +448,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create latest \
-            --title "vayu · Android 16 Kernel · Build #${{ github.run_number }} · MAIN:${MAIN_KSU_VERSION} / DEV:${DEV_KSU_VERSION}" \
+            --title "vayu · Android 16 Kernel · Build #${DISPLAY_BUILD_NUM} · MAIN:${MAIN_KSU_VERSION} / DEV:${DEV_KSU_VERSION}" \
             --notes-file /tmp/release_notes.md \
             --latest \
             release/*.zip
