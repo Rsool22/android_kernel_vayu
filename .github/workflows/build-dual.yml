@@ -264,9 +264,9 @@ jobs:
 
           # Write release notes to a file (heredoc avoids quoting nightmares)
           cat > /tmp/release_notes.md << 'NOTES'
-          ## Vayu-Anymore Kernel — ReSukiSU Edition
+          ## Vayu-Anymore Kernel — ReSukiSU · SUSFS · KPM · Docker · Droidspaces
 
-          > Custom kernel for the **Xiaomi Poco X3 Pro (vayu)** with full root, SUSFS stealth, and KernelPatch Module support.
+          > Custom kernel for the **Xiaomi Poco X3 Pro (vayu)** with full root, SUSFS stealth, KernelPatch Module support, Docker, and Droidspaces container support.
 
           ---
 
@@ -280,7 +280,7 @@ jobs:
           | **ReSukiSU Drivers — DEV** | `DEV_VER` |
           | **Kernel** | 4.14 nonGKI · arm64 |
           | **Compiler** | ZyC Clang 23.x · LLVM/LLD |
-          | **Features** | ReSukiSU · SUSFS Inline Hook · KPM |
+          | **Features** | ReSukiSU · SUSFS Inline Hook · KPM · Docker · Droidspaces |
 
           ---
 
@@ -323,6 +323,24 @@ jobs:
           4. Reboot — grant root access via the ReSukiSU Manager when prompted.
 
           > ⚠️ **Spoofed Manager** is only needed if your device/ROM fails SafetyNet/Play Integrity checks with the standard manager. Use standard unless you have a specific reason.
+
+          ---
+
+          ### 🐳 Docker Support
+
+          This kernel ships with full Docker support enabled. All Generally Necessary configs are green and all Optional configs that can be enabled on a 4.14 QCOM kernel are included.
+
+          To run Docker inside Termux, follow [this guide](https://gist.github.com/FreddieOliveira/efe850df7ff3951cb62d74bd770dce27#23-docker).
+
+          > ⚠️ Docker on Android 4.14 requires `iptables-legacy` and the `cgroupfs` driver — modern `nftables` and `BPF_CGROUP_DEVICE` are not supported on this kernel version. The guide above covers this.
+
+          ---
+
+          ### 📦 Droidspaces / LXC Container Support
+
+          Full Droidspaces container support is enabled in this kernel. All required namespaces, cgroup controllers, OverlayFS, networking, and bridge configs are active.
+
+          Download the Droidspaces rootfs from the [official releases page](https://github.com/ravindu644/Droidspaces-rootfs-builder/releases/latest) and follow the instructions in the [Droidspaces repository](https://github.com/ravindu644/Droidspaces-rootfs-builder).
           NOTES
 
           # Substitute placeholder tokens with actual values
@@ -336,7 +354,7 @@ jobs:
             /tmp/release_notes.md
 
           gh release create latest \
-            --title "Vayu-Anymore Kernel ReSukiSU Edition [main:${MAIN_KSU_VERSION} / dev:${DEV_KSU_VERSION}]" \
+            --title "Vayu-Anymore Kernel — ReSukiSU · SUSFS · KPM · Docker · Droidspaces [main:${MAIN_KSU_VERSION} / dev:${DEV_KSU_VERSION}]" \
             --notes-file /tmp/release_notes.md \
             --latest \
             release/*.zip
