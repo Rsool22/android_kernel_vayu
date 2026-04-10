@@ -1,4 +1,4 @@
-name: Vayu-AnyMore ReSukiSU+SuSFS+KPM (DEV&MAIN)
+name: Build · vayu Android 16 Kernel (ReSukiSU MAIN + DEV)
 
 on:
   schedule:
@@ -6,34 +6,38 @@ on:
   workflow_dispatch:
     inputs:
       reason:
-        description: 'Reason for manual build'
+        description: 'Reason for manual trigger'
         required: false
         default: 'Manual trigger'
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true   # silences Node 20 deprecation warnings
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true   # suppress Node 20 deprecation warnings
 
 jobs:
-  # ── Check both branches for updates ────────────────────────────────────────
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 1. Check both ReSukiSU branches for upstream changes
+  # ─────────────────────────────────────────────────────────────────────────────
   check-updates:
-    name: Check ReSukiSU for updates (dev + main)
+    name: Check ReSukiSU for updates (main + dev)
     runs-on: ubuntu-latest
     outputs:
       has_updates: ${{ steps.compare.outputs.has_updates }}
       dev_sha:     ${{ steps.shas.outputs.dev_sha }}
       main_sha:    ${{ steps.shas.outputs.main_sha }}
+
     steps:
-      - name: Get current ReSukiSU SHAs
+      - name: Fetch current ReSukiSU HEAD SHAs
         id: shas
         run: |
-          DEV=$(git ls-remote https://github.com/ReSukiSU/ReSukiSU.git refs/heads/dev | cut -f1)
+          DEV=$(git ls-remote https://github.com/ReSukiSU/ReSukiSU.git refs/heads/dev  | cut -f1)
           MAIN=$(git ls-remote https://github.com/ReSukiSU/ReSukiSU.git refs/heads/main | cut -f1)
           echo "dev_sha=${DEV}"   >> $GITHUB_OUTPUT
           echo "main_sha=${MAIN}" >> $GITHUB_OUTPUT
-          echo "  [CI] dev SHA:  ${DEV}"
+          echo "  [CI] dev  SHA: ${DEV}"
           echo "  [CI] main SHA: ${MAIN}"
 
-      - name: Restore last built SHA cache
+      - name: Restore SHA cache from last successful build
         id: cache
         uses: actions/cache/restore@v4
         with:
@@ -41,29 +45,40 @@ jobs:
           key: ksu-dual-${{ steps.shas.outputs.dev_sha }}-${{ steps.shas.outputs.main_sha }}
           restore-keys: ksu-dual-
 
-      - name: Determine if build is needed
+      - name: Decide whether a build is needed
         id: compare
         run: |
           if [ "${{ steps.cache.outputs.cache-hit }}" = "true" ] && \
              [ "${{ github.event_name }}" = "schedule" ]; then
             echo "has_updates=false" >> $GITHUB_OUTPUT
-            echo "  [CI] No new commits on either branch -- skipping build."
+            echo "  [CI] No new commits on either branch — skipping build."
           else
             echo "has_updates=true" >> $GITHUB_OUTPUT
+            echo "  [CI] Updates detected (or manual trigger) — proceeding with build."
           fi
 
-  # ── Build matrix (dev + main in parallel) ──────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 2. Build kernel (matrix: main + dev in parallel)
+  # ─────────────────────────────────────────────────────────────────────────────
   build:
     name: Build [${{ matrix.ksu_branch }}]
     needs: check-updates
     if: needs.check-updates.outputs.has_updates == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     strategy:
       matrix:
-        ksu_branch: [dev, main]
+        ksu_branch: [main, dev]
       fail-fast: false
+
     env:
       KSU_BRANCH: ${{ matrix.ksu_branch }}
+      # ── ccache ───────────────────────────────────────────────────────────────
+      CCACHE_DIR:        /home/runner/.ccache
+      CCACHE_DIRECT:     1
+      CCACHE_NOHASHDIR:  1
+      CCACHE_SLOPPINESS: random_seed,include_file_mtime,include_file_ctime
+      CCACHE_BASEDIR:    ${{ github.workspace }}
 
     steps:
       - name: Checkout kernel source
@@ -82,7 +97,7 @@ jobs:
       - name: Restore ccache
         uses: actions/cache/restore@v4
         with:
-          path: ~/.ccache
+          path: /home/runner/.ccache
           key: ccache-${{ matrix.ksu_branch }}-${{ hashFiles('arch/arm64/configs/vayu_defconfig') }}-${{ github.run_number }}
           restore-keys: |
             ccache-${{ matrix.ksu_branch }}-${{ hashFiles('arch/arm64/configs/vayu_defconfig') }}-
@@ -95,18 +110,17 @@ jobs:
           ccache --set-config=compression=true
           ccache --set-config=compression_level=1
           ccache -z
-          echo "CCACHE_DIR=${HOME}/.ccache" >> $GITHUB_ENV
 
       - name: Download ZyC Clang 23.x
         run: bash .github/scripts/fetch_clang.sh
 
-      - name: Setup ReSukiSU driver (${{ matrix.ksu_branch }} branch)
+      - name: Install ReSukiSU driver (${{ matrix.ksu_branch }} branch)
         run: |
-          bash <(curl -LSs https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh) ${{ matrix.ksu_branch }}
+          bash <(curl -LSs https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh) \
+            ${{ matrix.ksu_branch }}
 
       - name: Apply KSU hook guards
-        run: |
-          KERNEL_DIR="${GITHUB_WORKSPACE}" python3 scripts/apply_ksu_guards.py
+        run: KERNEL_DIR="${GITHUB_WORKSPACE}" python3 scripts/apply_ksu_guards.py
 
       - name: Build kernel
         env:
@@ -119,10 +133,10 @@ jobs:
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: ~/.ccache
+          path: /home/runner/.ccache
           key: ccache-${{ matrix.ksu_branch }}-${{ hashFiles('arch/arm64/configs/vayu_defconfig') }}-${{ github.run_number }}
 
-      - name: Upload zip artifact
+      - name: Upload kernel zip artifact
         uses: actions/upload-artifact@v4
         with:
           name: kernel-${{ matrix.ksu_branch }}
@@ -131,53 +145,57 @@ jobs:
             Anykernel-Builds/ksu_version_*.txt
           retention-days: 1
 
-  # ── Create single release with both zips ───────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 3. Publish rolling release with both zips + Manager APKs
+  # ─────────────────────────────────────────────────────────────────────────────
   release:
-    name: Create Combined Release
+    name: Publish Release
     needs: [check-updates, build]
     if: needs.check-updates.outputs.has_updates == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
-      - name: Checkout (needed for gh CLI repo context)
+      - name: Checkout (for gh CLI repo context)
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Download DEV zip
-        uses: actions/download-artifact@v4
-        with:
-          name: kernel-dev
-          path: release/
-
-      - name: Download MAIN zip
+      - name: Download MAIN kernel zip
         uses: actions/download-artifact@v4
         with:
           name: kernel-main
           path: release/
 
-      - name: Download ReSukiSU Manager Artifacts (dev + main)
+      - name: Download DEV kernel zip
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-dev
+          path: release/
+
+      - name: Fetch ReSukiSU Manager APKs (main + dev)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p release/
 
-          # Strategy: query workflow runs filtered by branch + event=push + status=success,
-          # then walk runs newest-first until we find one that has BOTH manager artifacts
-          # (non-expired). This guarantees we only pull from signed push builds, never
-          # from scheduled/unsigned runs, and never from runs with missing artifacts.
+          # Walk the last 30 successful push-triggered runs per branch,
+          # newest first, and grab the first run that has the artifact
+          # still available (not expired). This ensures we only pull from
+          # signed push builds, never from scheduled or unsigned runs.
 
           ARTIFACT_NAMES=(
             "Manager-release|ReSukiSU-Manager"
             "Spoofed-Manager-release|ReSukiSU-Spoofed-Manager"
           )
 
-          for BRANCH_TAG in DEV MAIN; do
-            BRANCH_LC="${BRANCH_TAG,,}"   # "DEV" → "dev", "MAIN" → "main"
+          for BRANCH_TAG in MAIN DEV; do
+            BRANCH_LC="${BRANCH_TAG,,}"
 
             echo ""
-            echo "  [CI] ── ${BRANCH_TAG} manager (branch=${BRANCH_LC}, event=push) ──────────"
+            echo "  [CI] ── ${BRANCH_TAG} manager (branch=${BRANCH_LC}, event=push) ──"
 
-            # Fetch up to 30 most recent successful push runs on this branch
             RUNS=$(curl -sf \
               -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
@@ -189,7 +207,7 @@ jobs:
           " || true)
 
             if [ -z "$RUNS" ]; then
-              echo "  [CI] No successful push runs found on branch '${BRANCH_LC}' -- skipping."
+              echo "  [CI] No successful push runs found on '${BRANCH_LC}' — skipping."
               continue
             fi
 
@@ -198,13 +216,12 @@ jobs:
               OUT_BASE="${ENTRY##*|}"
               OUT_FILE="release/${OUT_BASE}-${BRANCH_TAG}.zip"
 
-              echo "  [CI] Looking for '${ARTIFACT_NAME}' (push-only, branch=${BRANCH_LC})..."
+              echo "  [CI] Looking for '${ARTIFACT_NAME}' on branch '${BRANCH_LC}'..."
 
               ARTIFACT_ID=""
               while IFS= read -r RUN_ID; do
                 [ -z "$RUN_ID" ] && continue
 
-                # Get artifacts for this specific run
                 ARTIFACT_ID=$(curl -sf \
                   -H "Authorization: Bearer ${GH_TOKEN}" \
                   -H "Accept: application/vnd.github+json" \
@@ -224,7 +241,7 @@ jobs:
               done <<< "$RUNS"
 
               if [ -z "$ARTIFACT_ID" ]; then
-                echo "  [CI] No non-expired '${ARTIFACT_NAME}' found in any push run on '${BRANCH_LC}' -- skipping."
+                echo "  [CI] No non-expired '${ARTIFACT_NAME}' found on '${BRANCH_LC}' — skipping."
                 continue
               fi
 
@@ -242,129 +259,151 @@ jobs:
           echo "  [CI] Release folder contents:"
           ls -lh release/
 
-      - name: Read ReSukiSU version codes from build artifacts
+      - name: Read ReSukiSU version codes
         run: |
           MAIN_VER=$(cat release/ksu_version_MAIN.txt 2>/dev/null | tr -d '[:space:]' || echo "unknown")
           DEV_VER=$(cat  release/ksu_version_DEV.txt  2>/dev/null | tr -d '[:space:]' || echo "unknown")
-          echo "  [CI] Driver versions -- MAIN: ${MAIN_VER}  DEV: ${DEV_VER}"
+          echo "  [CI] Driver versions — MAIN: ${MAIN_VER}  DEV: ${DEV_VER}"
           echo "MAIN_KSU_VERSION=${MAIN_VER}" >> $GITHUB_ENV
           echo "DEV_KSU_VERSION=${DEV_VER}"   >> $GITHUB_ENV
-          # Formatted date for the release body (github.run_started_at is unavailable here)
           echo "RELEASE_DATE=$(date -u '+%Y-%m-%d %H:%M UTC')" >> $GITHUB_ENV
 
-      - name: Publish Rolling Release
+      - name: Delete existing latest release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Delete the existing 'latest' release and its tag so we can recreate
-          # it fresh. This keeps one single release that updates every build
-          # instead of accumulating a new release per run.
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
-          sleep 3   # give GitHub time to process the deletion
+          sleep 5   # allow GitHub time to propagate the deletion
 
-          # Write release notes to a file (heredoc avoids quoting nightmares)
+      - name: Write release notes
+        run: |
+          TRIGGER="${{ github.event_name == 'schedule' && 'Scheduled (daily at 03:00 UTC)' || inputs.reason }}"
+
+          # Note: the heredoc content is indented to satisfy YAML's literal block
+          # scalar rules. The trailing sed call strips those leading spaces so
+          # the Markdown renders correctly on GitHub.
           cat > /tmp/release_notes.md << 'NOTES'
-          ## Vayu-Anymore Kernel — ReSukiSU · SUSFS · KPM · Docker · Droidspaces
+          <div align="center">
 
-          > Custom kernel for the **Xiaomi Poco X3 Pro (vayu)** with full root, SUSFS stealth, KernelPatch Module support, Docker, and Droidspaces container support.
+          ### 📦 Poco X3 Pro (`vayu`) · Android 16 Custom Kernel
+
+          **Linux 4.14 NonGKI · ReSukiSU · SUSFS Inline-Hook · KPM · Docker · Droidspaces**
+
+          </div>
 
           ---
 
-          ### 🔧 Build Info
+          ## 🔧 Build Info
+
           | Property | Value |
           |----------|-------|
-          | **Build** | #BUILD_NUM |
-          | **Date** | RELEASE_DATE |
-          | **Trigger** | TRIGGER |
-          | **ReSukiSU Drivers — MAIN** | `MAIN_VER` |
-          | **ReSukiSU Drivers — DEV** | `DEV_VER` |
-          | **Kernel** | 4.14 nonGKI · arm64 |
-          | **Compiler** | ZyC Clang 23.x · LLVM/LLD |
-          | **Features** | ReSukiSU · SUSFS Inline Hook · KPM · Docker · Droidspaces |
+          | 🏗️ **Build** | #BUILD_NUM |
+          | 📅 **Date** | RELEASE_DATE |
+          | ⚡ **Trigger** | TRIGGER_VAL |
+          | 🐧 **Kernel** | Linux 4.14 NonGKI · arm64 |
+          | 🔨 **Toolchain** | ZyC Clang 23.x · LLVM/LLD |
+          | 🟢 **ReSukiSU MAIN** | `MAIN_VER` |
+          | 🟡 **ReSukiSU DEV** | `DEV_VER` |
+          | ✨ **Features** | ReSukiSU · SUSFS Inline-Hook · KPM · Docker · Droidspaces |
 
           ---
 
-          ### 📦 Kernel Packages
-          Flash **one** of these via recovery — pick the branch you want to track.
+          ## 📥 Kernel Zips
 
-          | File | Branch | Driver Version |
-          |------|--------|---------------|
-          | `*MAIN*.zip` | 🟢 MAIN — stable | `MAIN_VER` |
-          | `*DEV*.zip`  | 🟡 DEV — latest features | `DEV_VER` |
+          > Flash **one** zip via [OrangeFox for vayu](https://orangefox.download/device/61310755bb6a91af6a656d0d) or any AnyKernel3-compatible recovery.
 
-          ---
-
-          ### 📱 Manager APKs
-          > Bundled from the latest ReSukiSU CI push on the matching branch.
-          > Each zip contains the APK — extract and install directly.
-
-          | File | Branch | Variant |
-          |------|--------|---------|
-          | `ReSukiSU-Manager-MAIN.zip`         | 🟢 MAIN | Standard |
-          | `ReSukiSU-Spoofed-Manager-MAIN.zip` | 🟢 MAIN | Spoofed (GMS bypass) |
-          | `ReSukiSU-Manager-DEV.zip`          | 🟡 DEV  | Standard |
-          | `ReSukiSU-Spoofed-Manager-DEV.zip`  | 🟡 DEV  | Spoofed (GMS bypass) |
+          | File | Branch | Driver Version | Description |
+          |------|:------:|:--------------:|-------------|
+          | `*MAIN*.zip` | 🟢 **MAIN** | `MAIN_VER` | Stable — recommended for daily use |
+          | `*DEV*.zip`  | 🟡 **DEV**  | `DEV_VER`  | Latest — newest features, may be less tested |
 
           ---
 
-          ### ⚡ Installation Guide
+          ## 📲 Manager APKs
+
+          > Each zip contains the APK — extract and sideload directly.
+          > **Always match the Manager branch to the kernel zip you flashed.**
+
+          | File | Branch | Variant | When to use |
+          |------|:------:|:-------:|-------------|
+          | `ReSukiSU-Manager-MAIN.zip`         | 🟢 **MAIN** | Standard | Default choice |
+          | `ReSukiSU-Spoofed-Manager-MAIN.zip` | 🟢 **MAIN** | GMS-spoofed | ROM fails Play Integrity with standard APK |
+          | `ReSukiSU-Manager-DEV.zip`          | 🟡 **DEV**  | Standard | Default choice |
+          | `ReSukiSU-Spoofed-Manager-DEV.zip`  | 🟡 **DEV**  | GMS-spoofed | ROM fails Play Integrity with standard APK |
+
+          ---
+
+          ## 🚀 Installation
 
           **Requirements**
-          - Xiaomi Poco X3 Pro (codename: `vayu`)
-          - Custom recovery — [Click Here to Download OrangeFox Recovery for Vayu](https://orangefox.download/device/61310755bb6a91af6a656d0d)
-          - Android 16
-          - Official DTBO for the Android 16 firmware this kernel source targets
-          - Unlocked bootloader
+          - 📱 Device: Xiaomi Poco X3 Pro (codename: `vayu`, SM8150)
+          - 🔓 Unlocked bootloader + Android 16 ROM
+          - 🦊 Recovery: [OrangeFox for vayu](https://orangefox.download/device/61310755bb6a91af6a656d0d) or any TWRP-based recovery
 
           **Steps**
+
           1. Boot into recovery.
-          2. Flash the kernel zip matching your preferred branch (`MAIN` = stable, `DEV` = latest).
-          3. Extract the matching Manager zip and install the APK.
-          4. Reboot — grant root access via the ReSukiSU Manager when prompted.
-
-          > ⚠️ **Spoofed Manager** is only needed if your device/ROM fails SafetyNet/Play Integrity checks with the standard manager. Use standard unless you have a specific reason.
+          2. Flash the kernel zip for your preferred branch (`MAIN` = stable, `DEV` = latest features).
+          3. Reboot to system.
+          4. Install the matching Manager APK and grant root access when prompted.
 
           ---
 
-          ### 🐳 Docker Support
+          ## 🐳 Docker Support
 
-          This kernel ships with full Docker support enabled. All Generally Necessary configs are green and all Optional configs that can be enabled on a 4.14 QCOM kernel are included.
+          All Generally Necessary Docker configs pass the Moby [check-config.sh](https://github.com/moby/moby/blob/master/contrib/check-config.sh) script. Optional configs viable on 4.14 QCOM are also included.
 
-          To run Docker inside Termux, follow [this guide](https://gist.github.com/FreddieOliveira/efe850df7ff3951cb62d74bd770dce27#23-docker).
-
-          > ⚠️ Docker on Android 4.14 requires `iptables-legacy` and the `cgroupfs` driver — modern `nftables` and `BPF_CGROUP_DEVICE` are not supported on this kernel version. The guide above covers this.
+          > **Note:** Docker on 4.14 requires `iptables-legacy` and the `cgroupfs` driver.
+          > `CFS_BANDWIDTH` is unavailable due to `SCHED_WALT=y`.
+          > For Termux setup, follow [this guide](https://gist.github.com/FreddieOliveira/efe850df7ff3951cb62d74bd770dce27#23-docker).
 
           ---
 
-          ### 📦 Droidspaces / LXC Container Support
+          ## 📦 Droidspaces / LXC
 
-          Full Droidspaces container support is enabled in this kernel. All required namespaces, cgroup controllers, OverlayFS, networking, and bridge configs are active.
+          Full Droidspaces container support is enabled — all required namespaces, cgroup v2 controllers, OverlayFS with redirect + index, networking bridges, TUN, FUSE, and IPC configs are active.
 
-          Download the Droidspaces rootfs from the [official releases page](https://github.com/ravindu644/Droidspaces-rootfs-builder/releases/latest) and follow the instructions in the [Droidspaces repository](https://github.com/ravindu644/Droidspaces-rootfs-builder).
+          [🔗 Droidspaces OSS](https://github.com/ravindu644/Droidspaces-OSS) ·
+          [📖 Android install guide](https://github.com/ravindu644/Droidspaces-OSS/blob/main/Documentation/Installation-Android.md) ·
+          [💾 rootfs downloads](https://github.com/ravindu644/Droidspaces-rootfs-builder/releases/latest)
+
+          ---
+
+          > [!WARNING]
+          > **Disclaimer:** Flash at your own risk. I am not responsible for bricked devices, bootloops, or data loss. **Always back up your boot partition before flashing.**
           NOTES
 
-          # Substitute placeholder tokens with actual values
-          TRIGGER="${{ github.event_name == 'schedule' && 'Scheduled (daily)' || inputs.reason }}"
+          # Strip the 10-space indent that was required for YAML literal block validity
+          sed -i 's/^          //' /tmp/release_notes.md
+
+          # Substitute placeholder tokens with real values
           sed -i \
             -e "s|BUILD_NUM|${{ github.run_number }}|g" \
-            -e "s|RELEASE_DATE|${RELEASE_DATE}|g" \
-            -e "s|TRIGGER|${TRIGGER}|g" \
-            -e "s|MAIN_VER|${MAIN_KSU_VERSION}|g" \
-            -e "s|DEV_VER|${DEV_KSU_VERSION}|g" \
+            -e "s|RELEASE_DATE|${RELEASE_DATE}|g"       \
+            -e "s|TRIGGER_VAL|${TRIGGER}|g"             \
+            -e "s|MAIN_VER|${MAIN_KSU_VERSION}|g"       \
+            -e "s|DEV_VER|${DEV_KSU_VERSION}|g"         \
             /tmp/release_notes.md
 
+      - name: Publish rolling release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
           gh release create latest \
-            --title "Vayu-Anymore Kernel — ReSukiSU · SUSFS · KPM · Docker · Droidspaces [main:${MAIN_KSU_VERSION} / dev:${DEV_KSU_VERSION}]" \
+            --title "vayu · Android 16 Kernel · Build #${{ github.run_number }} · MAIN:${MAIN_KSU_VERSION} / DEV:${DEV_KSU_VERSION}" \
             --notes-file /tmp/release_notes.md \
             --latest \
             release/*.zip
 
-  # ── Save SHA cache after successful release ─────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 4. Persist SHA cache so the next scheduled run can skip if nothing changed
+  # ─────────────────────────────────────────────────────────────────────────────
   save-cache:
     name: Save ReSukiSU SHA cache
     needs: [check-updates, release]
     if: needs.check-updates.outputs.has_updates == 'true'
     runs-on: ubuntu-latest
+
     steps:
       - name: Save combined SHA cache
         uses: actions/cache/save@v4
