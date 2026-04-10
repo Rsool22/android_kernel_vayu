@@ -1,6 +1,6 @@
 <div align="center">
 
-# android_kernel_vayu
+# android\_kernel\_vayu
 
 **Linux 4.14 · NonGKI · Android 16 · Xiaomi Poco X3 Pro**
 
@@ -20,7 +20,7 @@
 
 ---
 
-Custom kernel source for the Poco X3 Pro (`vayu`, SM8150) based on the [AnymoreProject](https://github.com/AnymoreProject) 4.14 tree targeting Android 16. Ships with ReSukiSU v4.1.0, SUSFS v2.1.0 in inline-hook mode, and KPM support — all working on a non-GKI 4.14 kernel where kprobes are completely broken.
+Custom kernel source for the Poco X3 Pro (`vayu`, SM8150) based on the [AnymoreProject](https://github.com/AnymoreProject) 4.14 tree targeting Android 16. Ships with ReSukiSU v4.1.0, SUSFS v2.1.0 in inline-hook mode, and KPM support — all working on a non-GKI 4.14 kernel using manual source hooks, which is the correct and recommended approach for this architecture.
 
 Includes an interactive `build.sh` TUI and a GitHub Actions CI pipeline that builds both the ReSukiSU `main` and `dev` branches in parallel and publishes a rolling release automatically.
 
@@ -48,17 +48,79 @@ Includes an interactive `build.sh` TUI and a GitHub Actions CI pipeline that bui
 
 ### ReSukiSU v4.1.0
 
-Integrated via the official `setup.sh`. The driver lives at `drivers/kernelsu/` and is wired into Kconfig and the build system. Because kprobes are completely broken on this kernel, SUSFS inline-hook is the primary hook mode. Manual-hook mode is also supported from the same source tree — controlled entirely by which defconfig flag is active.
+<parameter name="file_text"><div align="center">
 
-The two hook modes are **mutually exclusive**. `CONFIG_KSU_SUSFS` and `CONFIG_KSU_MANUAL_HOOK` cannot both be set. Every call site in the kernel source is guarded accordingly so you can switch modes by changing the defconfig without touching any source files.
+# android\_kernel\_vayu
+
+**Linux 4.14 · NonGKI · Android 16 · Xiaomi Poco X3 Pro**
+
+[![Build Status](https://img.shields.io/github/actions/workflow/status/Rsool22/android_kernel_vayu/build-dual.yml?branch=16&style=for-the-badge&logo=github-actions&logoColor=white&label=CI)](https://github.com/Rsool22/android_kernel_vayu/actions/workflows/build-dual.yml)
+[![Latest Release](https://img.shields.io/github/v/release/Rsool22/android_kernel_vayu?style=for-the-badge&logo=github&logoColor=white&label=Release)](https://github.com/Rsool22/android_kernel_vayu/releases/latest)
+[![Last Commit](https://img.shields.io/github/last-commit/Rsool22/android_kernel_vayu/16?style=for-the-badge&logo=git&logoColor=white)](https://github.com/Rsool22/android_kernel_vayu/commits/16)
+[![License](https://img.shields.io/badge/License-GPL--2.0-blue?style=for-the-badge&logo=gnu&logoColor=white)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)
+
+[![Kernel](https://img.shields.io/badge/Kernel-Linux%204.14%20NonGKI-orange?style=for-the-badge&logo=linux&logoColor=white)](https://kernel.org/)
+[![Android](https://img.shields.io/badge/Android-16-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com/)
+[![Device](https://img.shields.io/badge/Device-Poco%20X3%20Pro%20(vayu)-9B59B6?style=for-the-badge)](https://www.gsmarena.com/xiaomi_poco_x3_pro-10611.php)
+[![ReSukiSU](https://img.shields.io/badge/ReSukiSU-v4.1.0-red?style=for-the-badge)](https://github.com/ReSukiSU/ReSukiSU)
+
+**[→ Download Latest Release](https://github.com/Rsool22/android_kernel_vayu/releases/latest)**
+
+</div>
+
+---
+
+Custom kernel source for the Poco X3 Pro (`vayu`, SM8150) based on the [AnymoreProject](https://github.com/AnymoreProject) 4.14 tree targeting Android 16. Ships with ReSukiSU v4.1.0, SUSFS v2.1.0 in inline-hook mode, and KPM support — all running on a non-GKI 4.14 kernel via direct manual source hooks, which is the correct and recommended integration method for this architecture.
+
+Includes an interactive `build.sh` TUI and a GitHub Actions CI pipeline that builds both the ReSukiSU `main` and `dev` branches in parallel and publishes a rolling release automatically.
+
+> [!WARNING]
+> **Disclaimer:** Flashing custom kernels may void your device warranty. I am not responsible for bricked devices, bootloops, data loss, or any other damage. Always back up your data before flashing. **You do this at your own risk.**
+
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Download](#download)
+- [Building Locally](#building-locally)
+- [build.sh Reference](#buildsh-reference)
+- [Docker Support](#docker-support)
+- [Droidspaces / LXC Container Support](#droidspaces--lxc-container-support)
+- [GitHub Actions CI](#github-actions-ci)
+- [Troubleshooting](#troubleshooting)
+- [Credits](#credits)
+- [Reference Links](#reference-links)
+
+---
+
+## Features
+
+### ReSukiSU v4.1.0
+
+Integrated via the official `setup.sh`. The driver lives at `drivers/kernelsu/` and is wired into Kconfig and the build system. ReSukiSU is a KernelSU downstream project derived from SukiSU Ultra, focused specifically on non-GKI kernel compatibility. It hooks into the kernel via direct manual source modifications — no kprobes involved. This is the correct integration path for non-GKI 4.14 kernels, where ReSukiSU's hook abstraction handles everything automatically once the call sites are in place.
+
+Two hook modes are supported from the same source tree:
+
+| Mode | Config | When to use |
+|:----:|--------|------------|
+| **SUSFS Inline-Hook** | `CONFIG_KSU_SUSFS=y` | Primary mode — pairs with SUSFS for concealment and hooks |
+| **Manual-Hook** | `CONFIG_KSU_MANUAL_HOOK=y` | Standalone mode — hooks only, no SUSFS |
+
+> [!IMPORTANT]
+> These two modes are **mutually exclusive**. `CONFIG_KSU_SUSFS` and `CONFIG_KSU_MANUAL_HOOK` cannot both be set at the same time. Every call site in the kernel source is guarded accordingly — switching modes is done entirely in defconfig, with no source changes required.
 
 ### SUSFS v2.1.0
 
-Patches cherry-picked from the [sidex15 SM8150 reference tree](https://github.com/sidex15/android_kernel_lge_sm8150) — 29 commits in total, three of which required manual conflict resolution. The critical fix for root not working on 4.14 non-GKI is a `ksu_handle_setresuid` call in `kernel/sys.c` guarded with `#if defined(CONFIG_KSU_SUSFS) || defined(CONFIG_KSU_MANUAL_HOOK)`. Without this, the kernel boots fine but root is never granted.
+Filesystem-level root concealment layer, patched via cherry-picks from the [sidex15 SM8150 reference tree](https://github.com/sidex15/android_kernel_lge_sm8150) — 29 commits in total, three of which required manual conflict resolution.
+
+The critical fix for root not working on 4.14 non-GKI is a `ksu_handle_setresuid` call in `kernel/sys.c` guarded with `#if defined(CONFIG_KSU_SUSFS) || defined(CONFIG_KSU_MANUAL_HOOK)`. Without this call site, the kernel boots and compiles without error, but root is never granted to any app.
+
+Additional patched files include `fs/exec.c`, `fs/open.c`, `fs/stat.c`, `fs/read_write.c`, `kernel/reboot.c`, `kernel/sys.c`, `drivers/input/input.c`, `fs/namespace.c` (with `path_umount` backported from 5.9 for module unmounting support), `fs/proc/task_mmu.c`, and `security/selinux/`.
 
 ### KPM (KernelPatch Modules)
 
-Enabled via `CONFIG_KPM=y` with `KALLSYMS` and `KALLSYMS_ALL`. Works for loading KPM modules; the KPM card in the manager UI requires uname spoofing via SUSFS, which is already configured.
+Enabled via `CONFIG_KPM=y`, with `KALLSYMS` and `KALLSYMS_ALL` also set. Allows loading KPM modules at runtime. The KPM card in the manager UI requires uname spoofing via SUSFS, which is already configured. KPM support is considered experimental on 4.14 hardware.
 
 ### Docker & Droidspaces
 
@@ -75,14 +137,14 @@ Pre-built zips are published by the GitHub Actions CI after every successful bui
 | File | Description |
 |------|-------------|
 | `*MAIN*.zip` | Kernel zip — ReSukiSU `main` (stable) + SUSFS + KPM |
-| `*DEV*.zip` | Kernel zip — ReSukiSU `dev` (latest) + SUSFS + KPM |
+| `*DEV*.zip` | Kernel zip — ReSukiSU `dev` (latest features) + SUSFS + KPM |
 | `ReSukiSU-Manager-MAIN.zip` | Standard Manager APK (MAIN branch) |
 | `ReSukiSU-Spoofed-Manager-MAIN.zip` | GMS-spoofed Manager APK (MAIN branch) |
 | `ReSukiSU-Manager-DEV.zip` | Standard Manager APK (DEV branch) |
 | `ReSukiSU-Spoofed-Manager-DEV.zip` | GMS-spoofed Manager APK (DEV branch) |
 
 > [!TIP]
-> Use the **Spoofed Manager** if your ROM fails Play Integrity with the standard APK. Always match the Manager APK branch to the kernel zip you flashed.
+> Use the **Spoofed Manager** if your ROM fails Play Integrity checks with the standard APK. Always match the Manager APK branch to the kernel zip you flashed.
 
 **Flash steps:**
 1. Boot into OrangeFox (or any TWRP-based recovery).
@@ -243,7 +305,7 @@ Queries the [ZyCromerZ/Clang](https://github.com/ZyCromerZ/Clang) GitHub API, do
 ```
 [I]  Install driver        (first-time setup)
 [U]  Update driver         (checks remote SHA before pulling)
-[T]  Switch branch         (main ↔ dev, forces clean build)
+[T]  Switch branch         (main <-> dev, forces clean build)
 [V]  Verify hook guards
 [X]  Remove driver
 ```
@@ -376,16 +438,19 @@ AnyKernel3/               ← must be committed into the repo
 ## Troubleshooting
 
 **Root not working after flash**
-Verify the Manager APK branch matches the kernel zip you flashed. If it does, confirm `ksu_handle_setresuid` is present in `kernel/sys.c` — this is the critical call site for root grant on 4.14 non-GKI. Without it, the kernel boots fine but root is never granted.
+Verify the Manager APK branch matches the kernel zip you flashed. If it does, confirm `ksu_handle_setresuid` is present and correctly guarded in `kernel/sys.c` — this is the critical call site for root grant on 4.14 non-GKI. Without it, the kernel boots fine but root is never granted to any app.
 
-**SUSFS not working**
-Confirm `CONFIG_KSU_SUSFS=y` and that `CONFIG_KSU_MANUAL_HOOK` is explicitly not set. Having both set simultaneously causes silent failures.
+**SUSFS not working / app detection bypass failing**
+Confirm `CONFIG_KSU_SUSFS=y` is set and `CONFIG_KSU_MANUAL_HOOK` is explicitly unset. Having both flags active simultaneously causes silent failures. Also confirm you are using the Spoofed Manager variant if your ROM enforces Play Integrity.
+
+**Hook mode confusion between MAIN and DEV builds**
+The MAIN and DEV kernel zips both use SUSFS Inline-Hook mode. The only difference is the ReSukiSU driver version (from the respective upstream branch). Match the Manager APK to the zip — do not mix branches.
 
 **Incremental build locked**
 The ReSukiSU branch or hook mode changed since the last build. A full clean is required; the lock clears automatically once it completes.
 
 **Modules not loading after reboot**
-Ensure no hook guards fire twice in SUSFS mode. Call sites guarded with `CONFIG_KSU_SUSFS || CONFIG_KSU_MANUAL_HOOK` must not overlap with the inline hooks already baked in by the SUSFS cherry-picks.
+Ensure no hook guards fire twice in SUSFS mode. Call sites guarded with `CONFIG_KSU_SUSFS || CONFIG_KSU_MANUAL_HOOK` must not overlap with the inline hooks already baked in by the SUSFS cherry-picks. Run `[V] Verify Guards` in the Driver Manager to audit all call sites.
 
 **GitHub API rate limited**
 60 unauthenticated requests per hour. Manually download the tarball from [ZyCromerZ/Clang/releases](https://github.com/ZyCromerZ/Clang/releases) and extract it to `clang/`.
@@ -394,7 +459,7 @@ Ensure no hook guards fire twice in SUSFS mode. Call sites guarded with `CONFIG_
 Confirm terminal encoding is UTF-8 and your font includes box-drawing characters (`╔ ╗ ╚ ╝ ║ ═`).
 
 **Manager APK missing from CI release**
-The release job searches the last 30 push-triggered upstream runs. If all 30 have expired (GitHub retains artifacts for 90 days by default), the APK is skipped with a warning and the release is published without it.
+The release job searches the last 30 push-triggered upstream runs. If all 30 have expired (GitHub retains artifacts for 90 days by default), the APK is skipped with a warning and the release is published without it. Download the APK directly from the [ReSukiSU releases page](https://github.com/ReSukiSU/ReSukiSU/releases) in that case.
 
 ---
 
@@ -431,6 +496,7 @@ The release job searches the last 30 push-triggered upstream runs. If all 30 hav
 | Docker on Termux | https://gist.github.com/FreddieOliveira/efe850df7ff3951cb62d74bd770dce27#23-docker |
 | AnymoreProject base tree | https://github.com/AnymoreProject |
 | sidex15 SM8150 reference | https://github.com/sidex15/android_kernel_lge_sm8150 |
+| KernelSU non-GKI integration guide | https://kernelsu.org/guide/how-to-integrate-for-non-gki.html |
 
 ---
 
