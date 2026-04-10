@@ -12,13 +12,13 @@
 [![Kernel](https://img.shields.io/badge/Kernel-Linux%204.14%20NonGKI-orange?style=for-the-badge&logo=linux&logoColor=white)](https://kernel.org/)
 [![Android](https://img.shields.io/badge/Android-16-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com/)
 [![Device](https://img.shields.io/badge/Device-Poco%20X3%20Pro%20(vayu)-9B59B6?style=for-the-badge)](https://www.gsmarena.com/xiaomi_poco_x3_pro-10611.php)
-[![ReSukiSU](https://img.shields.io/badge/ReSukiSU-v4.1.0-red?style=for-the-badge)](https://github.com/ReSukiSU/ReSukiSU)
+[![ReSukiSU](https://img.shields.io/badge/ReSukiSU-Kernel%20Root-red?style=for-the-badge)](https://github.com/ReSukiSU/ReSukiSU)
 
 </div>
 
 ---
 
-Custom kernel source for the Poco X3 Pro (`vayu`, SM8150) based on the [AnymoreProject](https://github.com/AnymoreProject) 4.14 tree targeting Android 16. Ships with ReSukiSU v4.1.0, SUSFS v2.1.0 in inline-hook mode, and KPM support — all running on a non-GKI 4.14 kernel via direct manual source hooks, which is the correct and recommended integration method for this architecture.
+Custom kernel source for the Poco X3 Pro (`vayu`, SM8150) based on the [AnymoreProject](https://github.com/AnymoreProject) 4.14 tree targeting Android 16. Ships with ReSukiSU (auto-updated via CI), SUSFS v2.1.0 in inline-hook mode, and KPM support — all running on a non-GKI 4.14 kernel via direct manual source hooks, which is the correct and recommended integration method for this architecture.
 
 Includes an interactive `build.sh` TUI and a GitHub Actions CI pipeline that builds both the ReSukiSU `main` and `dev` branches in parallel and publishes a rolling release automatically.
 
@@ -44,9 +44,11 @@ Includes an interactive `build.sh` TUI and a GitHub Actions CI pipeline that bui
 
 ## Features
 
-### ReSukiSU v4.1.0
+### ReSukiSU
 
 Integrated via the official `setup.sh`. The driver lives at `drivers/kernelsu/` and is wired into Kconfig and the build system. ReSukiSU is a KernelSU downstream project derived from SukiSU Ultra, focused specifically on non-GKI kernel compatibility. It hooks into the kernel via direct manual source modifications — no kprobes involved. This is the correct integration path for non-GKI 4.14 kernels, where ReSukiSU's hook abstraction handles everything automatically once the call sites are in place.
+
+ReSukiSU does not publish versioned GitHub releases — driver version codes (e.g. `34781`) are internal build numbers produced by upstream CI and are displayed in each release's Build Info table.
 
 Two hook modes are supported from the same source tree:
 
@@ -345,7 +347,11 @@ Full [Droidspaces](https://github.com/ravindu644/Droidspaces-OSS) container supp
 
 Builds both `main` and `dev` ReSukiSU branches in parallel on every upstream change and publishes a single rolling `latest` release. Workflow: [`.github/workflows/build-dual.yml`](.github/workflows/build-dual.yml).
 
+No repository secrets or variables are required — the workflow uses only the built-in `GITHUB_TOKEN`.
+
 ### Jobs
+
+**`reset-counter`** *(optional, manual only)* — resets the display build number back to `#1` by computing a new offset and committing it to `.build_counter_offset` in the repo root. Only runs when the workflow is dispatched manually with **Reset build number counter** checked. Uses `GITHUB_TOKEN` with `contents: write` — no PAT required.
 
 **`check-updates`** — fetches HEAD SHAs from both ReSukiSU branches. If the combined SHA matches the cached value from the last successful run and the trigger is scheduled, the build is skipped entirely. Manual dispatch always builds regardless of the cache.
 
@@ -354,6 +360,19 @@ Builds both `main` and `dev` ReSukiSU branches in parallel on every upstream cha
 **`release`** — downloads both kernel zips, fetches matching Manager APKs from the upstream ReSukiSU CI (searches the last 30 successful push-triggered runs per branch), deletes the existing `latest` release, and recreates it with all files attached.
 
 **`save-cache`** — persists the combined SHA cache key after a successful release so the next scheduled run can skip if nothing changed.
+
+### Build Counter
+
+The workflow reads `.build_counter_offset` from the repo root to compute a clean sequential display build number:
+
+```
+display_num = GITHUB_RUN_NUMBER - offset
+```
+
+Create this file in the repo root with value `0` to initialise it. To reset the counter back to `#1`, trigger the workflow manually and check **Reset build number counter** — it will commit the new offset automatically with `[skip ci]` so no build is triggered.
+
+> [!TIP]
+> You can also update the counter manually: open `.build_counter_offset`, set it to `current_run_number - 1`, and commit.
 
 ### ccache Configuration
 
@@ -375,9 +394,8 @@ Builds both `main` and `dev` ReSukiSU branches in parallel on every upstream cha
 scripts/
 └── apply_ksu_guards.py
 AnyKernel3/               ← must be committed into the repo
+.build_counter_offset     ← initialise with value 0
 ```
-
-**Optional:** Set the `BUILD_COUNTER_OFFSET` repo variable under **Settings → Variables → Actions variables** to offset `GITHUB_RUN_NUMBER` and produce a clean sequential build number. No secrets are required — the workflow uses the built-in `GITHUB_TOKEN`.
 
 **Triggers:** Daily at 03:00 UTC (skipped automatically if no upstream changes), or manually via **Actions → Run workflow**.
 
@@ -450,6 +468,6 @@ The release job searches the last 30 push-triggered upstream runs. If all 30 hav
 
 <div align="center">
 
-Poco X3 Pro (`vayu`, SM8150) · Linux 4.14 NonGKI · Android 16 · ZyC Clang 23.x · ReSukiSU v4.1.0 · SUSFS v2.1.0 · KPM
+Poco X3 Pro (`vayu`, SM8150) · Linux 4.14 NonGKI · Android 16 · ZyC Clang 23.x · ReSukiSU · SUSFS v2.1.0 · KPM
 
 </div>
