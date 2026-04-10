@@ -27,12 +27,12 @@ jobs:
     name: Reset build counter
     if: github.event_name == 'workflow_dispatch' && inputs.reset_counter == true
     runs-on: ubuntu-latest
-    permissions:
-      actions: write
     steps:
       - name: Set BUILD_COUNTER_OFFSET so next release shows #1
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITHUB_TOKEN cannot manage repository variables (HTTP 403).
+          # Use a fine-grained PAT with "Variables: Read and write" permission.
+          GH_TOKEN: ${{ secrets.VARIABLES_PAT }}
         run: |
           # Offset = run_number - 1  →  display = run_number - offset = 1
           OFFSET=$(( ${{ github.run_number }} - 1 ))
