@@ -254,7 +254,10 @@ func (s KSUScreen) View() string {
 	branchW := components.GlobalKeyWidth // shares the global bracket column with [main]/[dev]
 	innerW := innerContentWidth(w)
 	var ups strings.Builder
-	ups.WriteString(probeRow("main", branchW, s.main, s.probed, innerW, s.app.Cfg.KSUBranch == "main") + "\n")
+	// Separate rows with a blank line so adjacent PRESENT / ABSENT / NETWORK
+	// badges don't merge into a single coloured bar
+	// (see components/layout.go:BadgeRowGap).
+	ups.WriteString(probeRow("main", branchW, s.main, s.probed, innerW, s.app.Cfg.KSUBranch == "main") + "\n\n")
 	ups.WriteString(probeRow("dev", branchW, s.dev, s.probed, innerW, s.app.Cfg.KSUBranch == "dev"))
 	upsPanel := components.Panel("Upstream branches", ups.String(), w, PanelBorder, TitleStyle)
 

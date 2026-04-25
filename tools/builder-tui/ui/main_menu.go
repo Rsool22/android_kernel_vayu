@@ -276,30 +276,17 @@ func clampWidth(w, min, max int) int {
 	return w
 }
 
-// panelWidth returns the screen width used for banners/panels: the full
-// terminal width minus a 2-column right gutter so trailing borders never
-// touch the right edge of the terminal (looks much cleaner on most emulators).
+// panelWidth returns the outer width every box on the current screen
+// uses. Thin shim around components.PageWidth so screens keep calling
+// panelWidth(app.Width) while the actual math lives centrally in the
+// components package (see components/layout.go).
 func panelWidth(termWidth int) int {
-	if termWidth <= 0 {
-		termWidth = 80
-	}
-	w := termWidth - 2
-	if w < 60 {
-		w = 60
-	}
-	if w > 160 {
-		w = 160
-	}
-	return w
+	return components.PageWidth(termWidth)
 }
 
-// innerContentWidth is the visible content area inside a panel after
-// border (2) + horizontal padding (2). Used to size MenuRow leaders, KV
-// padding, etc.
+// innerContentWidth returns the content-area width inside a box of outer
+// width outerWidth. Thin shim around components.InnerWidth; see
+// components/layout.go for the canonical definition.
 func innerContentWidth(outerWidth int) int {
-	w := outerWidth - 4
-	if w < 20 {
-		w = 20
-	}
-	return w
+	return components.InnerWidth(outerWidth)
 }

@@ -67,7 +67,7 @@ func Banner(title, subtitle string, width int, border lipgloss.Style, titleStyle
 	if width < 30 {
 		width = 30
 	}
-	inner := width - 4 // border (2) + padding (2)
+	inner := InnerWidth(width)
 	titleLine := lipgloss.PlaceHorizontal(inner, lipgloss.Center, titleStyle.Render(title))
 	body := titleLine
 	if subtitle != "" {
@@ -88,7 +88,7 @@ func Panel(title, body string, width int, border lipgloss.Style, titleStyle lipg
 	if width < 20 {
 		width = 20
 	}
-	inner := width - 4
+	inner := InnerWidth(width)
 	if title != "" {
 		head := lipgloss.PlaceHorizontal(inner, lipgloss.Center, titleStyle.Render(strings.ToUpper(title)))
 		div := lipgloss.NewStyle().Foreground(border.GetBorderTopForeground()).Render(strings.Repeat("─", inner))
@@ -182,7 +182,7 @@ func LeaderRow(prefix, rhs string, width int, leaderStyle lipgloss.Style) string
 //	║   [i]  Stash your local edits before switching branches            ║
 //	╚══════════════════════════════════════════════════════════════════════╝
 func Notice(level, msg string, width int, border lipgloss.Style, titleStyle, bodyStyle lipgloss.Style) string {
-	inner := width - 4
+	inner := InnerWidth(width)
 	if inner < 12 {
 		inner = 12
 	}

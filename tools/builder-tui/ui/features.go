@@ -248,9 +248,12 @@ func (s FeaturesScreen) View() string {
 	driver := st.DriverPresent
 
 	// ── Toggles panel ───────────────────────────────────────────────────────
+	// Separate rows with a blank line so ENABLED / DISABLED badges stacked
+	// on adjacent lines don't bleed into a single coloured rectangle
+	// (see components/layout.go:BadgeRowGap).
 	var p strings.Builder
-	p.WriteString(featureRow("1", "ReSukiSU  (CONFIG_KSU)", st.KSU, true, driver, innerW) + "\n")
-	p.WriteString(featureRow("2", "SuSFS     (CONFIG_KSU_SUSFS)", st.SUSFS, st.KSU, driver, innerW) + "\n")
+	p.WriteString(featureRow("1", "ReSukiSU  (CONFIG_KSU)", st.KSU, true, driver, innerW) + "\n\n")
+	p.WriteString(featureRow("2", "SuSFS     (CONFIG_KSU_SUSFS)", st.SUSFS, st.KSU, driver, innerW) + "\n\n")
 	p.WriteString(featureRow("3", "KPM       (CONFIG_KPM)", st.KPM, st.KSU, driver, innerW))
 	togPanel := components.Panel("Toggles", p.String(), w, PanelBorder, TitleStyle)
 
