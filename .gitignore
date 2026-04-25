@@ -140,7 +140,8 @@ build.log
 clang/
 
 # AnyKernel3 & build output
-AnyKernel3/
+# NOTE: AnyKernel3/ is committed in this repo (vendored from target-16.2);
+# only the build-output siblings stay ignored.
 Anykernel-Builds/
 out/
 
@@ -150,3 +151,7 @@ out/
 .menuconfig_saved_config
 .build_number
 .scmversion
+
+# vayu-builder: don't ignore .github (kernel default ignores dot-prefixed paths)
+!.github
+!.github/**
