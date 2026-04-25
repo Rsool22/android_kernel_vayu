@@ -339,13 +339,19 @@ func padTo(s string, w int) string {
 //	  [dev ]  ABSENT   branch removed upstream
 //	  [foo ]  NETWORK  could not reach upstream
 //
-// branchW is the widest branch label across all rows (used for [..] padding);
+// branchW is the widest branch label across all rows; we pad AFTER the
+// closing bracket (instead of inside it) so [main] and [dev] both hug
+// their labels rather than rendering as [main] / [dev ]. The trailing
+// padding still keeps the badge column aligned.
 // badge text is padded to 7 chars (max of "present"/"absent"/"network").
 func probeRow(branch string, branchW int, p resukisu.Probe, probed bool) string {
 	const badgeW = 7
-	tag := components.BracketTag(strings.TrimSpace(branch), branchW, HotKeyStyle)
+	b := strings.TrimSpace(branch)
+	tag := components.BracketTag(b, len(b), HotKeyStyle)
+	tagPad := strings.Repeat(" ", branchW-len(b))
+	prefix := "  " + tag + tagPad + "  "
 	if !probed {
-		return "  " + tag + "  " + DimText.Render("(probing …)")
+		return prefix + DimText.Render("(probing …)")
 	}
 	switch p.State {
 	case resukisu.StatePresent:
@@ -353,15 +359,15 @@ func probeRow(branch string, branchW int, p resukisu.Probe, probed bool) string 
 		if len(short) > 8 {
 			short = short[:8]
 		}
-		return "  " + tag + "  " +
+		return prefix +
 			components.Badge(padTo("PRESENT", badgeW), BadgeOK) + "  " +
 			DimText.Render("HEAD@") + AccentText.Bold(true).Render(short)
 	case resukisu.StateAbsent:
-		return "  " + tag + "  " +
+		return prefix +
 			components.Badge(padTo("ABSENT", badgeW), BadgeWarn) + "  " +
 			DimText.Render("branch removed or merged upstream")
 	case resukisu.StateNetworkFail:
-		return "  " + tag + "  " +
+		return prefix +
 			components.Badge(padTo("NETWORK", badgeW), BadgeErr) + "  " +
 			DimText.Render("could not reach upstream — check connection")
 	}
