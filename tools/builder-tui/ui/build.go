@@ -523,8 +523,12 @@ func (s BuildScreen) renderSuccessSummary(inner int) string {
 	}
 	var b strings.Builder
 	const lblW = 14
+	valW := inner - lblW - 3 // " : "
+	if valW < 8 {
+		valW = 8
+	}
 	add := func(k, v string) {
-		b.WriteString(components.KV(k, v, lblW, LabelStyle, ValueStyle))
+		b.WriteString(components.KVWrap(k, v, lblW, valW, LabelStyle, ValueStyle))
 		b.WriteString("\n")
 	}
 	add("Build", fmt.Sprintf("#%d", num))
@@ -577,7 +581,11 @@ func (s BuildScreen) renderFailSummary(inner int) string {
 		b.WriteString(DimText.Render("  (no error: lines found — check the log)") + "\n")
 	}
 	b.WriteString(components.Separator(inner, MutedText) + "\n")
-	b.WriteString(components.KV("Log", filepath.Base(r.FailLog), 14, LabelStyle, DimText) + "\n")
+	wrapW := inner - 14 - 3
+	if wrapW < 8 {
+		wrapW = 8
+	}
+	b.WriteString(components.KVWrap("Log", filepath.Base(r.FailLog), 14, wrapW, LabelStyle, DimText) + "\n")
 	return b.String()
 }
 
@@ -587,7 +595,11 @@ func (s BuildScreen) renderCancelSummary(inner int) string {
 	b.WriteString(lipgloss.PlaceHorizontal(inner, lipgloss.Center,
 		WarnText.Render("Build cancelled by user")) + "\n")
 	b.WriteString(components.Separator(inner, MutedText) + "\n")
-	b.WriteString(components.KV("Elapsed", pipeline.FormatElapsed(int(r.Elapsed.Seconds())), 14, LabelStyle, DimText) + "\n")
+	wrapW := inner - 14 - 3
+	if wrapW < 8 {
+		wrapW = 8
+	}
+	b.WriteString(components.KVWrap("Elapsed", pipeline.FormatElapsed(int(r.Elapsed.Seconds())), 14, wrapW, LabelStyle, DimText) + "\n")
 	b.WriteString("  " + DimText.Render("Objects in out/ are intact for incremental retry") + "\n")
 	return b.String()
 }

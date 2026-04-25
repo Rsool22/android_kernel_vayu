@@ -143,18 +143,22 @@ func (m MainMenu) View() string {
 			DimText.Render("No previous build recorded")))
 	} else {
 		const lblW = 14
+		valW := innerW - lblW - 3 // " : "
+		if valW < 8 {
+			valW = 8
+		}
 		buildLine := fmt.Sprintf("#%d", pb.Num)
 		if pb.Date != "" {
 			buildLine = buildLine + "   " + pb.Date
 		}
-		prevBody.WriteString(components.KV("Build", buildLine, lblW, LabelStyle, DimText))
+		prevBody.WriteString(components.KVWrap("Build", buildLine, lblW, valW, LabelStyle, DimText))
 		if pb.KernelName != "" {
 			prevBody.WriteString("\n")
-			prevBody.WriteString(components.KV("Kernel-Name", pb.KernelName, lblW, LabelStyle, DimText))
+			prevBody.WriteString(components.KVWrap("Kernel-Name", pb.KernelName, lblW, valW, LabelStyle, DimText))
 		}
 		if pb.Mode != "" {
 			prevBody.WriteString("\n")
-			prevBody.WriteString(components.KV("Mode", pb.Mode, lblW, LabelStyle, DimText))
+			prevBody.WriteString(components.KVWrap("Mode", pb.Mode, lblW, valW, LabelStyle, DimText))
 		}
 		prevBody.WriteString("\n")
 		prevBody.WriteString(components.Separator(innerW, MutedText))
@@ -163,13 +167,13 @@ func (m MainMenu) View() string {
 		if cap == "" {
 			cap = "Unknown"
 		}
-		prevBody.WriteString(components.KV("Capabilities", cap, lblW, LabelStyle, DimText))
+		prevBody.WriteString(components.KVWrap("Capabilities", cap, lblW, valW, LabelStyle, DimText))
 		ext := pb.ExtFeat
 		if ext == "" {
 			ext = "[None]"
 		}
 		prevBody.WriteString("\n")
-		prevBody.WriteString(components.KV("Features", ext, lblW, LabelStyle, DimText))
+		prevBody.WriteString(components.KVWrap("Features", ext, lblW, valW, LabelStyle, DimText))
 	}
 	prevPanel := components.Panel("Previous Build", prevBody.String(), w, PanelDim, DimText.Bold(true))
 

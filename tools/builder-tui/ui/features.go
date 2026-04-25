@@ -303,15 +303,17 @@ func (s FeaturesScreen) View() string {
 	togPanel := components.Panel("Toggles", p.String(), w, PanelBorder, TitleStyle)
 
 	// ── Summary panel ───────────────────────────────────────────────────────
+	inner := innerContentWidth(w)
+	valW := inner - 14 // 11 (label col) + " : "
 	var sm strings.Builder
-	sm.WriteString(components.KV("Hook Mode", st.HookMode(), 11, LabelStyle, AccentText) + "\n")
-	sm.WriteString(components.KV("Caption", st.CapTag(s.app.Cfg.KSUBranch), 11, LabelStyle, ValueStyle) + "\n")
-	sm.WriteString(components.KV("Extras", st.ExtTag(), 11, LabelStyle, ValueStyle) + "\n")
+	sm.WriteString(components.KVWrap("Hook Mode", st.HookMode(), 11, valW, LabelStyle, AccentText) + "\n")
+	sm.WriteString(components.KVWrap("Caption", st.CapTag(s.app.Cfg.KSUBranch), 11, valW, LabelStyle, ValueStyle) + "\n")
+	sm.WriteString(components.KVWrap("Extras", st.ExtTag(), 11, valW, LabelStyle, ValueStyle) + "\n")
 	dc := s.defconfigPath()
 	if dc == "" {
-		sm.WriteString(components.KV("Defconfig", "(kernel root unresolved)", 11, LabelStyle, ErrText))
+		sm.WriteString(components.KVWrap("Defconfig", "(kernel root unresolved)", 11, valW, LabelStyle, ErrText))
 	} else {
-		sm.WriteString(components.KV("Defconfig", dc, 11, LabelStyle, DimText))
+		sm.WriteString(components.KVWrap("Defconfig", dc, 11, valW, LabelStyle, DimText))
 	}
 	sumPanel := components.Panel("Active features", sm.String(), w, PanelBorder, TitleStyle)
 

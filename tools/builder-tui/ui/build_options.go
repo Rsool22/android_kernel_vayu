@@ -173,10 +173,14 @@ func (s BuildOptionsScreen) View() string {
 
 	// ── Active Features summary panel ───────────────────────────────────────
 	st := readDefconfigState(s.app)
+	valW := inner - 14 - 3 // " : "
+	if valW < 8 {
+		valW = 8
+	}
 	var sm strings.Builder
-	sm.WriteString(components.KV("Capabilities", st.CapTag(s.app.Builder.KSUBranch), 14, LabelStyle, ValueStyle) + "\n")
-	sm.WriteString(components.KV("Features", st.ExtTag(), 14, LabelStyle, ValueStyle) + "\n")
-	sm.WriteString(components.KV("Hook Mode", st.HookMode(), 14, LabelStyle, AccentText))
+	sm.WriteString(components.KVWrap("Capabilities", st.CapTag(s.app.Builder.KSUBranch), 14, valW, LabelStyle, ValueStyle) + "\n")
+	sm.WriteString(components.KVWrap("Features", st.ExtTag(), 14, valW, LabelStyle, ValueStyle) + "\n")
+	sm.WriteString(components.KVWrap("Hook Mode", st.HookMode(), 14, valW, LabelStyle, AccentText))
 	summaryPanel := components.Panel("Active Features", sm.String(), w, PanelBorder, TitleStyle)
 
 	// ── Toggles + actions panel ─────────────────────────────────────────────
