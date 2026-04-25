@@ -157,13 +157,14 @@ func (s ToolchainScreen) View() string {
 	srcPanel := components.Panel("Source", src.String(), w, PanelBorder, TitleStyle)
 
 	// ── Action strip ────────────────────────────────────────────────────────
-	actions := components.HotkeyStrip([]string{
-		components.Hotkey("F", "Fetch", "check + download", HotKeyStyle, OKText, DimText),
-		components.Hotkey("C", "Check latest", "query upstream", HotKeyStyle, AccentText, DimText),
-		components.Hotkey("ESC", "Back", "", HotKeyStyle, DimText, DimText),
-	}, MutedText)
+	actions := components.HotkeyStrip([]components.Hotkey{
+		{Key: "F", Desc: "Fetch", Sub: "check + download"},
+		{Key: "C", Desc: "Check latest", Sub: "query upstream"},
+		{Key: "ESC", Desc: "Back"},
+	}, HotKeyStyle, ValueStyle, DimText, MutedText)
 
-	out := banner + "\n" + statePanel + "\n" + srcPanel + "\n  " + actions + "\n"
+	divider := "  " + components.Separator(innerContentWidth(w), MutedText) + "\n"
+	out := banner + "\n" + statePanel + "\n" + srcPanel + "\n" + divider + "  " + actions + "\n"
 
 	if s.busy {
 		out += "\n  " + AccentText.Render(s.stage+" …") + "\n  " + s.prog.View() + "\n"
@@ -174,15 +175,18 @@ func (s ToolchainScreen) View() string {
 	return out
 }
 
+// srcRow renders one source-selector row with [key] right-padded so all
+// closing brackets align in a column even when keys are mixed letters/digits.
 func srcRow(key, label string, selected bool, width int) string {
 	mark := "  "
 	if selected {
 		mark = SelText.Render(" ●")
 	}
-	row := mark + " " + HotKeyStyle.Render("["+key+"]") + "  " +
+	tag := components.BracketTag(key, 1, HotKeyStyle)
+	row := mark + " " + tag + "  " +
 		lipgloss.NewStyle().Foreground(ColorValue).Render(label)
 	if selected {
-		row += "  " + components.Badge("active", BadgeAccent)
+		row += "  " + components.Badge("ACTIVE", BadgeAccent)
 	}
 	return row
 }

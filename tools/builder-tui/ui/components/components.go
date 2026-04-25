@@ -67,13 +67,28 @@ func KV(key, value string, keyWidth int, keyStyle, valStyle lipgloss.Style) stri
 	return k + sep + valStyle.Render(value)
 }
 
+// BracketTag renders "[label]" right-padded so the closing bracket sits at
+//
+//	column (1 + maxLabelWidth + 1). Used to keep [main]/[dev] columns aligned
+//
+// regardless of inner text length.
+func BracketTag(label string, maxLabelWidth int, style lipgloss.Style) string {
+	if maxLabelWidth < len(label) {
+		maxLabelWidth = len(label)
+	}
+	inner := label + strings.Repeat(" ", maxLabelWidth-len(label))
+	return style.Render("[" + inner + "]")
+}
+
 // MenuRow renders a hotkey-style menu line that fills available width:
 //
 //	  [B]  Build kernel ......................... compile + package
 //
 // The dotted leader stretches between label and rhs to align values to the right.
-func MenuRow(key, label, rhs string, width int, keyStyle, labelStyle, rhsStyle, leaderStyle lipgloss.Style) string {
-	prefix := keyStyle.Render("["+key+"]") + "  " + labelStyle.Render(label)
+// keyWidth pads the bracketed key so closing brackets line up across rows.
+func MenuRow(key, label, rhs string, width, keyWidth int, keyStyle, labelStyle, rhsStyle, leaderStyle lipgloss.Style) string {
+	tag := BracketTag(key, keyWidth, keyStyle)
+	prefix := tag + "  " + labelStyle.Render(label)
 	rendered := lipgloss.Width(prefix) + lipgloss.Width(rhs) + 2
 	pad := width - rendered
 	if pad < 1 {
@@ -83,21 +98,40 @@ func MenuRow(key, label, rhs string, width int, keyStyle, labelStyle, rhsStyle, 
 	return prefix + leader + rhsStyle.Render(rhs)
 }
 
-// Hotkey renders a compact "[K] Description (subtext)" row used in action
-// strips at the bottom of screens.
-func Hotkey(key, desc, sub string, keyStyle, descStyle, subStyle lipgloss.Style) string {
-	out := keyStyle.Render("["+key+"]") + " " + descStyle.Render(desc)
-	if sub != "" {
-		out += " " + subStyle.Render("("+sub+")")
-	}
-	return out
+// Hotkey describes one entry in a footer action strip.
+type Hotkey struct {
+	Key, Desc, Sub string
 }
 
-// HotkeyStrip joins multiple hotkey strings with a thin separator, used as
-// a footer action bar.
-func HotkeyStrip(items []string, sepStyle lipgloss.Style) string {
-	sep := sepStyle.Render("  │  ")
-	return strings.Join(items, sep)
+// HotkeyStrip renders a list of hotkeys with brackets right-padded so every
+// closing `]` aligns to the same column inside the strip. Items are joined
+// with a coloured separator.
+func HotkeyStrip(items []Hotkey, keyStyle, descStyle, subStyle, sepStyle lipgloss.Style) string {
+	maxKey := 0
+	for _, h := range items {
+		if len(h.Key) > maxKey {
+			maxKey = len(h.Key)
+		}
+	}
+	parts := make([]string, 0, len(items))
+	for _, h := range items {
+		row := BracketTag(h.Key, maxKey, keyStyle) + " " + descStyle.Render(h.Desc)
+		if h.Sub != "" {
+			row += " " + subStyle.Render("("+h.Sub+")")
+		}
+		parts = append(parts, row)
+	}
+	sep := sepStyle.Render("  \u2502  ")
+	return strings.Join(parts, sep)
+}
+
+// Separator returns a thin horizontal divider used between sections at
+// `width` cols, drawn with `style`. Pure function -- no padding.
+func Separator(width int, style lipgloss.Style) string {
+	if width < 1 {
+		width = 1
+	}
+	return style.Render(strings.Repeat("\u2500", width))
 }
 
 // Rule draws a horizontal `── label ───────...` divider, used between sections

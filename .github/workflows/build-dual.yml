@@ -17,6 +17,12 @@ name: Build · vayu Android 16 (ReSukiSU dual-branch)
 on:
   schedule:
     - cron: "0 3 * * *"
+  # Run on push to the long-lived branch and to any short-lived `devin/*`
+  # working branch so PR validation produces real artefacts before merge.
+  push:
+    branches:
+      - 16-ReSukiSU
+      - "devin/**"
   workflow_dispatch:
     inputs:
       reason:

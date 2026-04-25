@@ -85,8 +85,14 @@ func (m MainMenu) View() string {
 	}
 	var menu strings.Builder
 	leader := lipgloss.NewStyle().Foreground(ColorMuted)
+	maxKey := 0
+	for _, it := range menuItems {
+		if len(it.key) > maxKey {
+			maxKey = len(it.key)
+		}
+	}
 	for i, it := range menuItems {
-		row := components.MenuRow(it.key, it.label, it.rhs, innerW,
+		row := components.MenuRow(it.key, it.label, it.rhs, innerW, maxKey,
 			HotKeyStyle,
 			lipgloss.NewStyle().Foreground(ColorValue).Bold(true),
 			lipgloss.NewStyle().Foreground(it.fg),
@@ -107,9 +113,11 @@ func (m MainMenu) View() string {
 
 	help := HelpStyle.Render(fmt.Sprintf("  press a hotkey · esc/q to quit · terminal %dx%d", m.app.Width, m.app.Height))
 
+	divider := "  " + components.Separator(innerW, MutedText) + "\n"
 	return banner + "\n" +
 		statusPanel + "\n" +
 		menuPanel + "\n" +
+		divider +
 		toast +
 		help
 }

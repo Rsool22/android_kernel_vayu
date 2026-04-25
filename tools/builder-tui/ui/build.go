@@ -135,13 +135,14 @@ func (s BuildScreen) View() string {
 	vpHeader := headLabel + MutedText.Render(strings.Repeat("─", headFillW)) + "\n"
 	_ = inner
 
-	actions := components.HotkeyStrip([]string{
-		components.Hotkey("B", "Build", "compile + package", HotKeyStyle, OKText, DimText),
-		components.Hotkey("↑/↓", "Scroll", "compiler output", HotKeyStyle, AccentText, DimText),
-		components.Hotkey("ESC", "Back", "", HotKeyStyle, DimText, DimText),
-	}, MutedText)
+	actions := components.HotkeyStrip([]components.Hotkey{
+		{Key: "B", Desc: "Build", Sub: "compile + package"},
+		{Key: "↑/↓", Desc: "Scroll", Sub: "compiler output"},
+		{Key: "ESC", Desc: "Back"},
+	}, HotKeyStyle, ValueStyle, DimText, MutedText)
 
-	out := banner + "\n" + statusPanel + "\n" + vpHeader + s.vp.View() + "\n\n  " + actions + "\n"
+	divider := "  " + components.Separator(inner, MutedText) + "\n"
+	out := banner + "\n" + statusPanel + "\n" + vpHeader + s.vp.View() + "\n" + divider + "  " + actions + "\n"
 
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"

@@ -123,26 +123,30 @@ func (s KSUScreen) View() string {
 	)
 
 	// ── Active selection ────────────────────────────────────────────────────
+	activeBadge := components.Badge(strings.ToUpper(s.app.Cfg.KSUBranch), BadgeAccent)
 	var sel strings.Builder
-	sel.WriteString(components.KV("Active", s.app.Cfg.KSUBranch, 9, LabelStyle, ValueStyle) + "\n")
+	sel.WriteString(components.KV("Active", activeBadge, 9, LabelStyle, ValueStyle) + "\n")
 	sel.WriteString(components.KV("Target", s.app.Paths.Kernel+"/drivers/kernelsu", 9, LabelStyle, AccentText))
 	selPanel := components.Panel("Selection", sel.String(), w, PanelBorder, TitleStyle)
 
 	// ── Upstream branch states ──────────────────────────────────────────────
+	// Right-pad branch label to the widest value so badges align in a column.
+	branchW := 4 // max(len("main"), len("dev"))
 	var ups strings.Builder
-	ups.WriteString(probeRow("main", s.main, s.probed) + "\n")
-	ups.WriteString(probeRow("dev ", s.dev, s.probed))
+	ups.WriteString(probeRow("main", branchW, s.main, s.probed) + "\n")
+	ups.WriteString(probeRow("dev", branchW, s.dev, s.probed))
 	upsPanel := components.Panel("Upstream branches", ups.String(), w, PanelBorder, TitleStyle)
 
 	// ── Action strip ────────────────────────────────────────────────────────
-	actions := components.HotkeyStrip([]string{
-		components.Hotkey("I", "Install / update", "from active branch", HotKeyStyle, OKText, DimText),
-		components.Hotkey("S", "Switch", "main ↔ dev", HotKeyStyle, AccentText, DimText),
-		components.Hotkey("P", "Re-probe", "git ls-remote", HotKeyStyle, WarnText, DimText),
-		components.Hotkey("ESC", "Back", "", HotKeyStyle, DimText, DimText),
-	}, MutedText)
+	actions := components.HotkeyStrip([]components.Hotkey{
+		{Key: "I", Desc: "Install / update", Sub: "from active branch"},
+		{Key: "S", Desc: "Switch", Sub: "main ↔ dev"},
+		{Key: "P", Desc: "Re-probe", Sub: "git ls-remote"},
+		{Key: "ESC", Desc: "Back"},
+	}, HotKeyStyle, ValueStyle, DimText, MutedText)
 
-	out := banner + "\n" + selPanel + "\n" + upsPanel + "\n  " + actions + "\n"
+	divider := "  " + components.Separator(innerContentWidth(w), MutedText) + "\n"
+	out := banner + "\n" + selPanel + "\n" + upsPanel + "\n" + divider + "  " + actions + "\n"
 
 	if s.busy {
 		out += "\n  " + AccentText.Render(s.stage+" …") + "\n"
@@ -153,8 +157,26 @@ func (s KSUScreen) View() string {
 	return out
 }
 
-func probeRow(branch string, p resukisu.Probe, probed bool) string {
-	tag := HotKeyStyle.Render("[" + strings.TrimSpace(branch) + "]")
+// padTo right-pads a string with spaces to a fixed visible width.
+func padTo(s string, w int) string {
+	if len(s) >= w {
+		return s
+	}
+	return s + strings.Repeat(" ", w-len(s))
+}
+
+// probeRow renders a single branch probe row with all columns aligned
+// regardless of branch label or status length:
+//
+//	  [main]  PRESENT  HEAD@7adffacb
+//	  [dev ]  ABSENT   branch removed upstream
+//	  [foo ]  NETWORK  could not reach upstream
+//
+// branchW is the widest branch label across all rows (used for [..] padding);
+// badge text is padded to 7 chars (max of "present"/"absent"/"network").
+func probeRow(branch string, branchW int, p resukisu.Probe, probed bool) string {
+	const badgeW = 7
+	tag := components.BracketTag(strings.TrimSpace(branch), branchW, HotKeyStyle)
 	if !probed {
 		return "  " + tag + "  " + DimText.Render("(probing …)")
 	}
@@ -165,15 +187,15 @@ func probeRow(branch string, p resukisu.Probe, probed bool) string {
 			short = short[:8]
 		}
 		return "  " + tag + "  " +
-			components.Badge("present", BadgeOK) + "  " +
-			DimText.Render("HEAD@") + AccentText.Render(short)
+			components.Badge(padTo("PRESENT", badgeW), BadgeOK) + "  " +
+			DimText.Render("HEAD@") + AccentText.Bold(true).Render(short)
 	case resukisu.StateAbsent:
 		return "  " + tag + "  " +
-			components.Badge("absent", BadgeWarn) + "  " +
+			components.Badge(padTo("ABSENT", badgeW), BadgeWarn) + "  " +
 			DimText.Render("branch removed or merged upstream")
 	case resukisu.StateNetworkFail:
 		return "  " + tag + "  " +
-			components.Badge("network", BadgeErr) + "  " +
+			components.Badge(padTo("NETWORK", badgeW), BadgeErr) + "  " +
 			DimText.Render("could not reach upstream — check connection")
 	}
 	return ""

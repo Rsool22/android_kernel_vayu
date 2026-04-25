@@ -82,12 +82,13 @@ func (s SetupScreen) View() string {
 		hintsPanel = components.Panel("Install hints ("+string(s.app.Paths.Distro)+")", h.String(), w, PanelBorder, TitleStyle) + "\n"
 	}
 
-	actions := components.HotkeyStrip([]string{
-		components.Hotkey("R", "Re-scan", "re-run autodiscovery", HotKeyStyle, OKText, DimText),
-		components.Hotkey("ESC", "Back", "", HotKeyStyle, DimText, DimText),
-	}, MutedText)
+	actions := components.HotkeyStrip([]components.Hotkey{
+		{Key: "R", Desc: "Re-scan", Sub: "re-run autodiscovery"},
+		{Key: "ESC", Desc: "Back"},
+	}, HotKeyStyle, ValueStyle, DimText, MutedText)
 
-	out := banner + "\n" + pathsPanel + "\n" + hintsPanel + "  " + actions + "\n"
+	divider := "  " + components.Separator(innerContentWidth(w), MutedText) + "\n"
+	out := banner + "\n" + pathsPanel + "\n" + hintsPanel + divider + "  " + actions + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}
