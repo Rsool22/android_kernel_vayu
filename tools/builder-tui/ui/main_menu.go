@@ -66,6 +66,9 @@ func (m MainMenu) Update(msg tea.Msg) (MainMenu, tea.Cmd) {
 		case "s":
 			m.app.Screen = ScreenSetup
 			return m, m.app.setup.Init()
+		case "d":
+			m.app.Screen = ScreenDeps
+			return m, m.app.deps.Init()
 		}
 	}
 	return m, nil
