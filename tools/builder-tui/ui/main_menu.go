@@ -173,7 +173,8 @@ func (m MainMenu) View() string {
 		menuItem{"T", "Toolchain manager", "Google AOSP / ZyC", ColorAccent, false},
 		menuItem{"K", "ReSukiSU driver", "branch: " + branchTag, ColorWarn, false},
 		menuItem{"F", "Feature toggles", "KSU / SuSFS / KPM / menuconfig", ColorAccent, false},
-		menuItem{"S", "Setup / paths", "deps + config", ColorAccent, false},
+		menuItem{"S", "Setup / paths", "edit 6 path slots", ColorAccent, false},
+		menuItem{"D", "Dependency check", "host packages probe", ColorAccent, false},
 		menuItem{"Q", "Quit", "exit builder", ColorMuted, false},
 	)
 	var menu strings.Builder
@@ -237,7 +238,7 @@ func (m MainMenu) View() string {
 	if m.app.HasImage {
 		opts = append(opts, "P")
 	}
-	opts = append(opts, "T", "K", "F", "S", "Q")
+	opts = append(opts, "T", "K", "F", "S", "D", "Q")
 	help := HelpStyle.Render(fmt.Sprintf(
 		"  press [%s] · esc/q to quit · terminal %dx%d",
 		strings.Join(opts, "/"), m.app.Width, m.app.Height,

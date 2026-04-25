@@ -106,12 +106,25 @@ var buildCmd = &cobra.Command{
 			close(ch)
 			close(done)
 		}()
+		statusName := func(s pipeline.Status) string {
+			switch s {
+			case pipeline.StatusOK:
+				return "OK"
+			case pipeline.StatusFailed:
+				return "FAIL"
+			case pipeline.StatusSkipped:
+				return "SKIP"
+			case pipeline.StatusCancelled:
+				return "CANCEL"
+			}
+			return "?"
+		}
 		for ev := range ch {
 			switch ev.Kind {
 			case pipeline.KindStageStart:
 				fmt.Fprintf(os.Stderr, "::group::Stage %s %s\n", ev.Stage, ev.Detail)
 			case pipeline.KindStageEnd:
-				fmt.Fprintf(os.Stderr, "[stage %s] %s -- %s\n", ev.Stage, ev.Status, ev.Detail)
+				fmt.Fprintf(os.Stderr, "[stage %s] %s -- %s\n", ev.Stage, statusName(ev.Status), ev.Detail)
 				fmt.Fprintln(os.Stderr, "::endgroup::")
 			case pipeline.KindLine:
 				if ev.IsErr {
