@@ -50,11 +50,12 @@ type BuildScreen struct {
 
 // stageView mirrors a pipeline.Stage's live state for rendering.
 type stageView struct {
-	Stage   pipeline.Stage
-	Status  pipeline.Status
-	Detail  string
-	Started time.Time
-	Ended   time.Time
+	Stage     pipeline.Stage
+	Status    pipeline.Status
+	Detail    string
+	Started   time.Time
+	Ended     time.Time
+	LineCount int // compile output lines attributed to this stage (S7)
 }
 
 // NewBuildScreen constructs the screen with its bubbles sub-models.
@@ -120,6 +121,15 @@ func (s BuildScreen) Update(msg tea.Msg) (BuildScreen, tea.Cmd) {
 		line := strings.TrimRight(m.line, "\r \t")
 		if len(s.lines) == 0 && strings.TrimSpace(line) == "" {
 			break
+		}
+		// Attribute the line to the still-running stage (S7 object-count
+		// progress). Walk backwards so we credit the latest running
+		// stage even if multiple are somehow tracked simultaneously.
+		for i := len(s.stages) - 1; i >= 0; i-- {
+			if s.stages[i].Stage == m.stage && s.stages[i].Status == pipeline.StatusRunning {
+				s.stages[i].LineCount++
+				break
+			}
 		}
 		s.lines = append(s.lines, line)
 		if len(s.lines) > 5000 {
@@ -479,6 +489,13 @@ func stageRow(sv stageView, spinFrame string, width int) string {
 	tag := components.GlobalBracketTag(num, HotKeyStyle)
 	prefix := tag + "  " + ValueStyle.Render(padTo(name, 10))
 	rhs := badge
+	// Per-stage stopwatch + object count (S7). RUNNING shows the live
+	// elapsed since the stage started and the number of compile lines
+	// attributed to it so far; finished stages show the final elapsed.
+	stamp := stageStamp(sv)
+	if stamp != "" {
+		rhs += "  " + DimText.Render(stamp)
+	}
 	if sv.Detail != "" {
 		rhs += "  " + DimText.Render(sv.Detail)
 	}
@@ -487,6 +504,30 @@ func stageRow(sv stageView, spinFrame string, width int) string {
 		pad = 1
 	}
 	return prefix + components.Leader(pad, MutedText) + rhs
+}
+
+// stageStamp returns the per-stage elapsed + compile-line counter used
+// in the right-hand gutter of the Pipeline panel.
+func stageStamp(sv stageView) string {
+	var elapsed time.Duration
+	switch sv.Status {
+	case pipeline.StatusRunning:
+		if !sv.Started.IsZero() {
+			elapsed = time.Since(sv.Started).Round(time.Second)
+		}
+	default:
+		if !sv.Started.IsZero() && !sv.Ended.IsZero() {
+			elapsed = sv.Ended.Sub(sv.Started).Round(time.Second)
+		}
+	}
+	var parts []string
+	if elapsed > 0 {
+		parts = append(parts, elapsed.String())
+	}
+	if sv.LineCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d lines", sv.LineCount))
+	}
+	return strings.Join(parts, "  ·  ")
 }
 
 // renderResultPanel renders ASCII art + summary panel after the pipeline

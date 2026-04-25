@@ -171,13 +171,42 @@ func (g *Google) Latest(ctx context.Context, target string) (Release, error) {
 		}
 	}
 	url := fmt.Sprintf("%s/+archive/refs/heads/%s/%s.tar.gz", googleBase, g.branch(), want)
+	// Gitiles serves a 302 + Content-Length on HEAD for archive bundles;
+	// probe so the UI can show an accurate estimate before download starts
+	// (prompt #10). Any failure -> leave as -1 (unknown).
+	size := probeContentLength(ctx, g.httpClient(), url)
 	return Release{
 		Tag:       want,
 		URL:       url,
 		AssetName: want + ".tar.gz",
-		SizeBytes: -1,
+		SizeBytes: size,
 		Source:    "google",
 	}, nil
+}
+
+// probeContentLength issues a HEAD and returns the Content-Length the
+// server advertises. Returns -1 on any error / missing header / redirect
+// that hides the size. Never follows redirects silently -- the default
+// http.Client does, which is fine for gitiles.
+func probeContentLength(ctx context.Context, client *http.Client, url string) int64 {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+	if err != nil {
+		return -1
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return -1
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return -1
+	}
+	if resp.ContentLength > 0 {
+		return resp.ContentLength
+	}
+	return -1
 }
 
 func (g *Google) fetch(ctx context.Context, url string) ([]byte, error) {

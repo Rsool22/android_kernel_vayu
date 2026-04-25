@@ -1,8 +1,10 @@
 package ui
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
@@ -140,6 +142,10 @@ func (s DepsScreen) missingPkgs() []string {
 	return out
 }
 
+// installCmd runs the host package manager to install the missing deps
+// and streams stdout/stderr line-by-line to the shared Activity log so
+// the user sees apt/dnf progress without having to leave the TUI. The
+// final depsInstallDoneMsg carries any error from Wait/Run.
 func (s DepsScreen) installCmd(pkgs []string) tea.Cmd {
 	return func() tea.Msg {
 		if len(pkgs) == 0 {
@@ -148,7 +154,10 @@ func (s DepsScreen) installCmd(pkgs []string) tea.Cmd {
 		var args []string
 		switch s.app.Paths.Distro {
 		case discover.PMApt:
-			args = append([]string{"sudo", "apt-get", "install", "-y"}, pkgs...)
+			// Update first so new packages resolve; chain with &&.
+			args = []string{"sh", "-c",
+				"sudo apt-get update && sudo apt-get install -y " + strings.Join(pkgs, " "),
+			}
 		case discover.PMDnf:
 			args = append([]string{"sudo", "dnf", "install", "-y"}, pkgs...)
 		case discover.PMPacman:
@@ -163,10 +172,43 @@ func (s DepsScreen) installCmd(pkgs []string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return depsInstallDoneMsg{err: fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))}
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return depsInstallDoneMsg{err: err}
+		}
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			return depsInstallDoneMsg{err: err}
+		}
+		if err := cmd.Start(); err != nil {
+			return depsInstallDoneMsg{err: err}
+		}
+		log := s.app.Activity
+		go streamTo(stdout, log, components.ActInfo)
+		go streamTo(stderr, log, components.ActWarn)
+		if err := cmd.Wait(); err != nil {
+			return depsInstallDoneMsg{err: err}
 		}
 		return depsInstallDoneMsg{}
+	}
+}
+
+// streamTo copies a reader line-by-line into an ActivityLog. Used for
+// piping child-process stdout / stderr to the UI without blocking the
+// tea event loop.
+func streamTo(r io.Reader, log *components.ActivityLog, lvl components.ActivityLevel) {
+	if log == nil {
+		_, _ = io.Copy(io.Discard, r)
+		return
+	}
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 1<<16), 1<<20)
+	for sc.Scan() {
+		line := strings.TrimRight(sc.Text(), "\r")
+		if line == "" {
+			continue
+		}
+		log.Append(lvl, line)
 	}
 }
 
@@ -181,13 +223,12 @@ func (s DepsScreen) Update(msg tea.Msg) (DepsScreen, tea.Cmd) {
 		s.busy = false
 		s.stage = ""
 		if m.err != nil {
-			s.app.Toast = "Install failed: " + m.err.Error()
-			s.app.ToastErr = true
-		} else {
-			s.app.Toast = "Install complete -- re-probing"
-			s.app.ToastErr = false
-			return s, s.probeCmd()
+			return s, s.app.SetToast("Install failed: "+m.err.Error(), true)
 		}
+		return s, tea.Batch(
+			s.app.SetToast("Install complete -- re-probing", false),
+			s.probeCmd(),
+		)
 	case tea.KeyMsg:
 		if s.busy {
 			return s, nil
@@ -200,25 +241,23 @@ func (s DepsScreen) Update(msg tea.Msg) (DepsScreen, tea.Cmd) {
 		case "i":
 			pkgs := s.missingPkgs()
 			if len(pkgs) == 0 {
-				s.app.Toast = "All dependencies present -- nothing to install"
-				return s, nil
+				return s, s.app.SetToast("All dependencies present -- nothing to install", false)
 			}
 			if s.app.Paths.Distro == discover.PMUnknown {
-				s.app.Toast = "Unknown distro -- install manually"
-				s.app.ToastErr = true
-				return s, nil
+				return s, s.app.SetToast("Unknown distro -- install manually", true)
 			}
 			s.busy = true
 			s.stage = "installing " + fmt.Sprint(len(pkgs)) + " packages"
+			if s.app.Activity != nil {
+				s.app.Activity.Info("$ " + s.installPreview(pkgs))
+			}
 			return s, s.installCmd(pkgs)
 		case "c":
 			pkgs := s.missingPkgs()
 			if len(pkgs) == 0 {
-				s.app.Toast = "Nothing missing"
-				return s, nil
+				return s, s.app.SetToast("Nothing missing", false)
 			}
-			s.app.Toast = "$ " + s.installPreview(pkgs)
-			s.app.ToastErr = false
+			return s, s.app.SetToast("$ "+s.installPreview(pkgs), false)
 		}
 	}
 	return s, nil
