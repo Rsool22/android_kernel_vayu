@@ -49,8 +49,11 @@ func (m MainMenu) Update(msg tea.Msg) (MainMenu, tea.Cmd) {
 				m.app.ToastErr = true
 				return m, nil
 			}
+			m.app.PackageOnly = true
 			m.app.Screen = ScreenBuild
-			return m, m.app.build.Init()
+			b, cmd := m.app.build.startBuild()
+			m.app.build = b
+			return m, cmd
 		case "t":
 			m.app.Screen = ScreenToolchain
 			return m, m.app.toolchain.Init()

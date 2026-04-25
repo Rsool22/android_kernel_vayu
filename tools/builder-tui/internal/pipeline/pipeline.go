@@ -110,6 +110,11 @@ type Options struct {
 	ForceClean     string // non-empty -> log a "forced clean: <reason>" warning on Stage 1
 	GuardScriptRel string // path under KernelDir, default "scripts/apply_ksu_guards.py"
 
+	// PackageOnly skips Stages 1-4 and runs only Stage 5 (packaging) against
+	// the existing out/arch/arm64/boot/Image. Used by the [P] entry on the
+	// main menu when a previous build is still on disk.
+	PackageOnly bool
+
 	// Stage 5 packaging metadata (caller fills this from naming.ZipName etc.)
 	ZipPath string
 
@@ -181,6 +186,17 @@ func Run(ctx context.Context, o Options, st features.State, events chan<- Event)
 	stageStart := func(stage Stage, detail string) time.Time {
 		events <- Event{Kind: KindStageStart, Stage: stage, Detail: detail}
 		return time.Now()
+	}
+
+	if o.PackageOnly {
+		// Skip stages 1-4: caller asserts out/arch/arm64/boot/Image is up to
+		// date; emit Skipped events so the TUI shows them collapsed.
+		for _, sk := range []Stage{StageClean, StageDefconfig, StageGuard, StageCompile} {
+			events <- Event{Kind: KindStageStart, Stage: sk, Detail: "package-only"}
+			r.Stages[sk] = StageResult{Status: StatusSkipped, Detail: "package-only"}
+			events <- Event{Kind: KindStageEnd, Stage: sk, Status: StatusSkipped, Detail: "package-only"}
+		}
+		goto stagePackage
 	}
 
 	// Stage 1
@@ -302,14 +318,14 @@ func Run(ctx context.Context, o Options, st features.State, events chan<- Event)
 	}
 
 	// ── Stage 4: Compile ─────────────────────────────────────────────────────
-	failLog := filepath.Join(o.OutputDir, "BUILD-FAIL.log")
-	r.FailLog = failLog
-	_ = os.MkdirAll(o.OutputDir, 0o755)
-	logF, _ := os.Create(failLog)
-	if logF != nil {
-		defer logF.Close()
-	}
 	{
+		failLog := filepath.Join(o.OutputDir, "BUILD-FAIL.log")
+		r.FailLog = failLog
+		_ = os.MkdirAll(o.OutputDir, 0o755)
+		logF, _ := os.Create(failLog)
+		if logF != nil {
+			defer logF.Close()
+		}
 		t := stageStart(StageCompile, fmt.Sprintf("%d threads", o.Jobs))
 		args := makeBaseArgs(o)
 		args = append(args,
@@ -359,6 +375,7 @@ func Run(ctx context.Context, o Options, st features.State, events chan<- Event)
 	}
 
 	// ── Stage 5: Package ─────────────────────────────────────────────────────
+stagePackage:
 	{
 		t := stageStart(StagePackage, "")
 		if o.AnyKernel == "" {

@@ -327,8 +327,10 @@ func (s BuildScreen) startBuild() (BuildScreen, tea.Cmd) {
 		ForceClean:    s.app.Builder.ForceCleanReason,
 		SkipDefconfig: s.app.MenuconfigUsed || s.app.MenuconfigPreserved,
 		PreservedCfg:  preservedCfg,
+		PackageOnly:   s.app.PackageOnly,
 		ZipPath:       zipPath,
 	}
+	s.app.PackageOnly = false
 
 	go runPipelineGoroutine(ctx, opts, st)
 

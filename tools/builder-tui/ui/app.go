@@ -57,6 +57,10 @@ type App struct {
 	// current session and the .config mtime advanced -- next build's
 	// Stage 2 will use olddefconfig instead of make <defconfig>.
 	MenuconfigUsed bool
+	// PackageOnly arms the next BuildScreen run as Stage-5-only (skip
+	// clean/defconfig/guard/compile). Set by [P] on the main menu and
+	// cleared after the run starts.
+	PackageOnly bool
 
 	main       MainMenu
 	toolchain  ToolchainScreen
