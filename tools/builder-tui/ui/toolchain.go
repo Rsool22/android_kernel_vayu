@@ -145,6 +145,30 @@ func (s ToolchainScreen) Update(msg tea.Msg) (ToolchainScreen, tea.Cmd) {
 		case "l":
 			s.applySource(sourceItem{source: config.ClangZyC, zycTag: "latest"})
 			s.cursor = 3
+		case "d":
+			// Delete the currently-active stored toolchain (if any).
+			// Older versions stored alongside it stay on disk so the
+			// user can swap back to them with [F]etch (which skips the
+			// download when the slot is already extracted).
+			installed := clang.ListInstalled(s.app.Paths.Clang)
+			var active *clang.InstalledVersion
+			for i := range installed {
+				if installed[i].Active {
+					active = &installed[i]
+					break
+				}
+			}
+			if active == nil {
+				s.log.Warn("nothing to delete: no active toolchain")
+				return s, nil
+			}
+			label := active.Source + "-" + active.Tag
+			if err := clang.RemoveInstalled(s.app.Paths.Clang, *active); err != nil {
+				s.log.Err("delete failed: " + err.Error())
+			} else {
+				s.log.OK("deleted " + label)
+			}
+			return s, nil
 		case "r", "b":
 			s.app.Screen = ScreenMain
 			return s, nil
@@ -229,6 +253,19 @@ func (s ToolchainScreen) View() string {
 		st.WriteString(components.KVWrap("Local", local, 11, valW, LabelStyle, OKText) + "\n")
 	}
 	st.WriteString(components.KVWrap("Install", okOr(s.app.Paths.Clang, "(unset)"), 11, valW, LabelStyle, MutedText))
+	if installed := clang.ListInstalled(s.app.Paths.Clang); len(installed) > 0 {
+		st.WriteString("\n" + components.Separator(inner, MutedText))
+		for _, v := range installed {
+			marker := "  "
+			st1 := MutedText
+			if v.Active {
+				marker = SelText.Render("● ")
+				st1 = OKText
+			}
+			line := marker + st1.Render(fmt.Sprintf("%-7s %s", v.Source, v.Tag))
+			st.WriteString("\n" + line)
+		}
+	}
 	statePanel := components.Panel("State", st.String(), w, PanelBorder, TitleStyle)
 
 	// ── Source selector panel (cursor-navigable) ────────────────────────────
@@ -274,13 +311,16 @@ func (s ToolchainScreen) View() string {
 	act.WriteString("  " + components.MenuRow("C", "Check Latest",
 		"query upstream, no install", mw, 1,
 		HotKeyStyle, labelSt, MutedText, leader) + "\n")
+	act.WriteString("  " + components.MenuRow("D", "Delete Active",
+		"remove active toolchain (others kept)", mw, 1,
+		HotKeyStyle, labelSt, MutedText, leader) + "\n")
 	act.WriteString("  " + components.MenuRow("R", "Return", "to Mode Select", mw, 1,
 		HotKeyStyle, labelSt, MutedText, leader))
 	actPanel := components.Panel("Actions", act.String(), w, PanelBorder, TitleStyle)
 
 	out := strings.Join([]string{
 		banner, statePanel, srcPanel, actPanel, logPanel,
-		"  " + HelpStyle.Render("Select [G/2/1/L/F/C/R]\u00a0\u00b7\u00a0esc to return"),
+		"  " + HelpStyle.Render("Select [G/2/1/L/F/C/D/R]\u00a0\u00b7\u00a0esc to return"),
 	}, "\n")
 	return strings.TrimRight(out, "\n ")
 }
