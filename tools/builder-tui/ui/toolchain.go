@@ -54,6 +54,20 @@ func (s ToolchainScreen) Update(msg tea.Msg) (ToolchainScreen, tea.Cmd) {
 		if s.busy {
 			return s, nil
 		}
+		// Arrow-nav for the Library inventory (prompt #5). ↑/↓ and k/j
+		// move the selection cursor; the [X] / [R] hotkeys act on it.
+		switch {
+		case key == "up" || key == "k":
+			if n := len(s.inventory); n > 0 {
+				s.invCursor = (s.invCursor - 1 + n) % n
+				return s, nil
+			}
+		case key == "down" || key == "j":
+			if n := len(s.inventory); n > 0 {
+				s.invCursor = (s.invCursor + 1) % n
+				return s, nil
+			}
+		}
 		switch key {
 		case "a":
 			s.app.Cfg.ClangSource = config.ClangAuto

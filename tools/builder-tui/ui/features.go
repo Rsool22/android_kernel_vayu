@@ -16,10 +16,15 @@ import (
 // FeaturesScreen mirrors the bash build's "FEATURE CONFIGURATION" menu.
 // Toggles ReSukiSU / SuSFS / KPM in vayu_defconfig with the same
 // cross-feature cascade rules as the original script.
+//
+// focus holds the arrow-nav cursor row (0 = KSU, 1 = SuSFS, 2 = KPM).
+// Enter/space toggles the focused row; the 1/2/3 hotkeys still work
+// as direct jumps. Prompt item #5 (universal arrow-nav).
 type FeaturesScreen struct {
 	app   *App
 	state features.State
 	read  bool
+	focus int
 }
 
 func NewFeaturesScreen(a *App) FeaturesScreen { return FeaturesScreen{app: a} }
@@ -63,7 +68,21 @@ func (s FeaturesScreen) Update(msg tea.Msg) (FeaturesScreen, tea.Cmd) {
 			s.app.ToastErr = true
 			return s, nil
 		}
-		switch strings.ToLower(m.String()) {
+		key := strings.ToLower(m.String())
+		// Arrow-nav cursor across the 3 feature rows (prompt #5).
+		switch key {
+		case "up", "k":
+			s.focus = (s.focus + 2) % 3
+			return s, nil
+		case "down", "j":
+			s.focus = (s.focus + 1) % 3
+			return s, nil
+		case "enter", " ":
+			// Toggle the focused row. Translate focus -> hotkey and fall
+			// through into the original per-row switch below.
+			key = []string{"1", "2", "3"}[s.focus]
+		}
+		switch key {
 		case "1":
 			st, err := features.ToggleKSU(dc, s.state)
 			s.state = st
@@ -209,8 +228,11 @@ func configMtime(p string) int64 {
 // variants (ENABLED/DISABLED/N/A/NO DRIVER) are padded to a fixed width
 // so they line up across rows; the leader fills the gap between label
 // and badge so badges sit at the same column regardless of label width.
-func featureRow(num, name string, enabled, available, driver bool, width int) string {
+// When selected is true the ▸ cursor glyph is rendered in the dedicated
+// cursor cell (prompt #5 + #6).
+func featureRow(num, name string, enabled, available, driver, selected bool, width int) string {
 	const badgeW = 10
+	cursor := components.CursorCell(selected, SelText)
 	tag := components.GlobalBracketTag(num, HotKeyStyle)
 	var label, rhs string
 	switch {
@@ -227,7 +249,7 @@ func featureRow(num, name string, enabled, available, driver bool, width int) st
 		label = DimText.Render(name)
 		rhs = components.Badge(padTo("DISABLED", badgeW), BadgeAccent)
 	}
-	prefix := tag + "  " + label
+	prefix := cursor + tag + "  " + label
 	return components.LeaderRow(prefix, rhs, width, MutedText)
 }
 
@@ -252,9 +274,9 @@ func (s FeaturesScreen) View() string {
 	// on adjacent lines don't bleed into a single coloured rectangle
 	// (see components/layout.go:BadgeRowGap).
 	var p strings.Builder
-	p.WriteString(featureRow("1", "ReSukiSU  (CONFIG_KSU)", st.KSU, true, driver, innerW) + "\n\n")
-	p.WriteString(featureRow("2", "SuSFS     (CONFIG_KSU_SUSFS)", st.SUSFS, st.KSU, driver, innerW) + "\n\n")
-	p.WriteString(featureRow("3", "KPM       (CONFIG_KPM)", st.KPM, st.KSU, driver, innerW))
+	p.WriteString(featureRow("1", "ReSukiSU  (CONFIG_KSU)", st.KSU, true, driver, s.focus == 0, innerW) + "\n\n")
+	p.WriteString(featureRow("2", "SuSFS     (CONFIG_KSU_SUSFS)", st.SUSFS, st.KSU, driver, s.focus == 1, innerW) + "\n\n")
+	p.WriteString(featureRow("3", "KPM       (CONFIG_KPM)", st.KPM, st.KSU, driver, s.focus == 2, innerW))
 	togPanel := components.Panel("Toggles", p.String(), w, PanelBorder, TitleStyle)
 
 	// ── Summary panel ───────────────────────────────────────────────────────

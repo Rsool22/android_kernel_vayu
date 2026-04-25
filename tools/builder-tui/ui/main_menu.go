@@ -11,8 +11,13 @@ import (
 )
 
 // MainMenu is the entry screen. Hotkeys: B/P/T/K/F/S/Q.
+//
+// focus tracks the ↑/↓ selection cursor on the menu (prompt #5). The
+// cursor is also used by Enter to dispatch the focused action, so the
+// user never needs the keyboard's letter row for navigation.
 type MainMenu struct {
-	app *App
+	app   *App
+	focus int
 }
 
 func NewMainMenu(a *App) MainMenu { return MainMenu{app: a} }
@@ -25,10 +30,36 @@ func (m MainMenu) pathsLocked() bool {
 	return m.app.Paths.Clang == "" || m.app.Paths.AnyKernel == ""
 }
 
+// menuKeys returns the hotkey sequence matching the current menu order.
+// Kept in sync with the items slice in View(); if that slice changes,
+// this function must change too.
+func (m MainMenu) menuKeys() []string {
+	keys := []string{"b"}
+	if m.app.HasImage {
+		keys = append(keys, "p")
+	}
+	keys = append(keys, "t", "k", "f", "s", "d", "v", "q")
+	return keys
+}
+
 func (m MainMenu) Update(msg tea.Msg) (MainMenu, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch strings.ToLower(msg.String()) {
+		key := strings.ToLower(msg.String())
+		// Universal arrow-nav on the main menu (prompt #5).
+		keys := m.menuKeys()
+		n := len(keys)
+		switch key {
+		case "up", "k":
+			m.focus = (m.focus + n - 1) % n
+			return m, nil
+		case "down", "j":
+			m.focus = (m.focus + 1) % n
+			return m, nil
+		case "enter", " ":
+			key = keys[m.focus]
+		}
+		switch key {
 		case "b":
 			if m.pathsLocked() {
 				m.app.Toast = "Cannot build — fix Clang / AnyKernel3 paths in Setup first"
@@ -72,6 +103,10 @@ func (m MainMenu) Update(msg tea.Msg) (MainMenu, tea.Cmd) {
 		case "v":
 			m.app.Screen = ScreenSettings
 			return m, m.app.settings.Init()
+		case "q":
+			// Reached via Enter on the Quit row; raw 'q' keypresses are
+			// already intercepted by App.Update before they get here.
+			return m, tea.Quit
 		}
 	}
 	return m, nil
@@ -193,10 +228,14 @@ func (m MainMenu) View() string {
 			rhs = "BLOCKED — fix paths first"
 			rhsStyle = ErrText
 		}
-		row := components.MenuRow(it.key, it.label, rhs, innerW, maxKey,
+		// Prefix the nav cursor in its own fixed column (prompt #6).
+		// Row width is shrunk by CursorCellWidth so the right edge
+		// still aligns with other boxes at the same page width.
+		cursor := components.CursorCell(i == m.focus, SelText)
+		row := components.MenuRow(it.key, it.label, rhs, innerW-components.CursorCellWidth, maxKey,
 			HotKeyStyle, labelStyle, rhsStyle, leader,
 		)
-		menu.WriteString(row)
+		menu.WriteString(cursor + row)
 		if i < len(items)-1 {
 			menu.WriteString("\n")
 		}

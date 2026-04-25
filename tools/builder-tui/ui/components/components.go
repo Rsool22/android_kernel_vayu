@@ -136,11 +136,12 @@ func GlobalBracketTag(label string, style lipgloss.Style) string {
 // the same width so columns line up. Used by source/branch/feature menus
 // so the active option is unambiguous (the previous bullet `●` was easy
 // to mistake for a list marker).
+//
+// Kept as a thin wrapper around CursorCell so the layout constants in
+// components/layout.go remain the single source of truth for the cursor
+// column width.
 func NavArrow(selected bool, style lipgloss.Style) string {
-	if selected {
-		return style.Render("▸ ")
-	}
-	return "  "
+	return CursorCell(selected, style)
 }
 
 // MenuRow renders a hotkey-style menu line that fills available width:

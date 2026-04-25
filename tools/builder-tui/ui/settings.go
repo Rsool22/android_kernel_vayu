@@ -65,7 +65,32 @@ func (s SettingsScreen) Update(msg tea.Msg) (SettingsScreen, tea.Cmd) {
 	}
 	switch m := msg.(type) {
 	case tea.KeyMsg:
-		switch strings.ToLower(m.String()) {
+		key := strings.ToLower(m.String())
+		// Arrow-nav cycles the theme variant forwards / backwards
+		// (prompt #5). Wraps around at the ends.
+		if key == "up" || key == "k" || key == "down" || key == "j" {
+			themes := []StyleVariant{StyleBash, StyleModern, StyleMono}
+			idx := 0
+			for i, t := range themes {
+				if t == CurrentStyle {
+					idx = i
+					break
+				}
+			}
+			if key == "up" || key == "k" {
+				idx = (idx + len(themes) - 1) % len(themes)
+			} else {
+				idx = (idx + 1) % len(themes)
+			}
+			ApplyStyle(themes[idx])
+			s.app.Cfg.Theme = string(themeLabel(themes[idx]))
+			s.app.PersistConfig()
+			s.app.Toast = "Theme: " + s.app.Cfg.Theme
+			s.app.ToastErr = false
+			return s, nil
+		}
+		_ = m
+		switch key {
 		case "1", "b":
 			ApplyStyle(StyleBash)
 			s.app.Cfg.Theme = "bash"

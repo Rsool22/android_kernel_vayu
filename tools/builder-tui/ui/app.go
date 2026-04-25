@@ -10,6 +10,7 @@ import (
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/config"
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/discover"
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/state"
+	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/ui/components"
 )
 
 // Screen is a discriminator for which child model is active.
@@ -155,6 +156,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.Screen = ScreenMain
 				return a, nil
 			}
+		case "?":
+			// Toggle the expanded help view shown below the screen body
+			// (S3 help bar). bubbles/help keeps its own ShowAll flag.
+			components.HelpModel.ShowAll = !components.HelpModel.ShowAll
+			return a, nil
 		}
 	}
 	switch a.Screen {
@@ -198,27 +204,63 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-// View renders the active screen.
+// View renders the active screen and appends the global help bar (S3).
+// Every screen sees the same one-line key hint strip at the bottom so
+// the user always knows which keys are live, regardless of where they
+// are in the TUI. The strip is driven by bubbles/help + components.Keys.
 func (a *App) View() string {
+	var body string
 	switch a.Screen {
 	case ScreenToolchain:
-		return a.toolchain.View()
+		body = a.toolchain.View()
 	case ScreenKSU:
-		return a.ksu.View()
+		body = a.ksu.View()
 	case ScreenBuild:
-		return a.build.View()
+		body = a.build.View()
 	case ScreenSetup:
-		return a.setup.View()
+		body = a.setup.View()
 	case ScreenFeatures:
-		return a.features.View()
+		body = a.features.View()
 	case ScreenBuildOptions:
-		return a.buildOpts.View()
+		body = a.buildOpts.View()
 	case ScreenDeps:
-		return a.deps.View()
+		body = a.deps.View()
 	case ScreenSettings:
-		return a.settings.View()
+		body = a.settings.View()
 	default:
-		return a.main.View()
+		body = a.main.View()
+	}
+	// Breadcrumb-style prefix on the help strip so the user always knows
+	// which page they're on (S8 foundation; enriched in a later phase).
+	crumb := MutedText.Render(a.breadcrumb())
+	help := components.HelpBar(crumb, panelWidth(a.Width), MutedText)
+	return body + "\n" + help
+}
+
+// breadcrumb returns a short "Page › Subpage" string for the current
+// screen, used by the global help strip so the user never loses
+// orientation. Kept minimal; S8 in a later phase can elaborate with
+// full navigation history.
+func (a *App) breadcrumb() string {
+	switch a.Screen {
+	case ScreenToolchain:
+		return "Main \u203a Toolchain"
+	case ScreenKSU:
+		return "Main \u203a ReSukiSU"
+	case ScreenBuild:
+		return "Main \u203a Build"
+	case ScreenSetup:
+		return "Main \u203a Setup"
+	case ScreenFeatures:
+		return "Main \u203a Features"
+	case ScreenBuildOptions:
+		return "Main \u203a Build \u203a Options"
+	case ScreenDeps:
+		return "Main \u203a Dependencies"
+	case ScreenSettings:
+		return "Main \u203a Visuals"
+	default:
+		return "Main"
 	}
 }
 

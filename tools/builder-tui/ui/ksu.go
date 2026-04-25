@@ -82,7 +82,18 @@ func (s KSUScreen) Update(msg tea.Msg) (KSUScreen, tea.Cmd) {
 		if s.busy {
 			return s, nil
 		}
-		switch strings.ToLower(m.String()) {
+		key := strings.ToLower(m.String())
+		// Arrow-nav / vim keys toggle the active branch (prompt #5).
+		if key == "up" || key == "k" || key == "down" || key == "j" {
+			if s.app.Cfg.KSUBranch == "main" {
+				s.app.Cfg.KSUBranch = "dev"
+			} else {
+				s.app.Cfg.KSUBranch = "main"
+			}
+			s.app.PersistConfig()
+			return s, nil
+		}
+		switch key {
 		case "p":
 			s.busy = true
 			s.stage = "probing upstream"
