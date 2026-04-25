@@ -240,7 +240,8 @@ func (s PathsScreen) View() string {
 		{"6", "arm-gcc   ", okOr(s.app.Paths.GccArm, defaultOr(s.app.Cfg.GCC32Dir, "(not found)")), s.app.Paths.GccArm == ""},
 	}
 	labelW := 12
-	prefixW := 4 /*"  [N]"*/ + 2 + labelW + 2
+	// "  [N]  Label         : " — mark(2) + tag(3) + 2sp + labelW + " : "(3)
+	prefixW := 2 + 3 + 2 + labelW + 3
 	valWrap := innerW - prefixW
 	if valWrap < 16 {
 		valWrap = 16
@@ -257,9 +258,9 @@ func (s PathsScreen) View() string {
 		}
 		tag := components.BracketTag(r.key, 1, HotKeyStyle)
 		valLines := wrapValue(r.value, valWrap)
-		head := mark + " " + tag + " " + LabelStyle.Render(padRight(r.label, labelW)) + LabelStyle.Render(" : ") + v.Render(valLines[0])
+		head := mark + tag + "  " + LabelStyle.Render(padRight(r.label, labelW)) + LabelStyle.Render(" : ") + v.Render(valLines[0])
 		p.WriteString(head)
-		indent := strings.Repeat(" ", prefixW)
+		indent := components.SafeRepeat(" ", prefixW)
 		for _, l := range valLines[1:] {
 			p.WriteString("\n" + indent + v.Render(l))
 		}

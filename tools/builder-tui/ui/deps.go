@@ -292,14 +292,17 @@ func (s DepsScreen) View() string {
 	// ── Actions panel ───────────────────────────────────────────────────────
 	leader := lipgloss.NewStyle().Foreground(ColorMuted)
 	labelStyle := lipgloss.NewStyle().Foreground(ColorValue).Bold(true)
+	// 2-col leading indent so [P/C/I] brackets align with the rest
+	// of the screens.
+	mw := inner - 2
 	var act strings.Builder
-	act.WriteString(components.MenuRow("P", "Re-probe", "refresh status", inner, 1,
+	act.WriteString("  " + components.MenuRow("P", "Re-probe", "refresh status", mw, 1,
 		HotKeyStyle, labelStyle, MutedText, leader) + "\n")
-	act.WriteString(components.MenuRow("C", "Show install cmd",
-		"copy/paste manually", inner, 1,
+	act.WriteString("  " + components.MenuRow("C", "Show install cmd",
+		"copy/paste manually", mw, 1,
 		HotKeyStyle, labelStyle, MutedText, leader) + "\n")
-	act.WriteString(components.MenuRow("I", "Install missing",
-		"via "+string(s.app.Paths.Distro), inner, 1,
+	act.WriteString("  " + components.MenuRow("I", "Install missing",
+		"via "+string(s.app.Paths.Distro), mw, 1,
 		HotKeyStyle, labelStyle, MutedText, leader))
 	actPanel := components.Panel("Actions", act.String(), w, PanelBorder, TitleStyle)
 

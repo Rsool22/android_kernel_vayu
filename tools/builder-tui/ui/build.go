@@ -460,7 +460,9 @@ func stageRow(sv stageView, spinFrame string, width int) string {
 		badge = MutedText.Render("…")
 	}
 	tag := components.BracketTag(num, 1, HotKeyStyle)
-	prefix := tag + "  " + ValueStyle.Render(padTo(name, 10))
+	// 2-col leading indent so the [#] bracket column lines up with menu
+	// rows on every other screen.
+	prefix := "  " + tag + "  " + ValueStyle.Render(padTo(name, 10))
 	rhs := badge
 	if sv.Detail != "" {
 		rhs += "  " + DimText.Render(sv.Detail)

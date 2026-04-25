@@ -17,26 +17,34 @@ import (
 //
 // width is the *outer* width including borders. The banner auto-wraps long
 // titles/subtitles to the inner width so a narrow terminal doesn't overflow.
+//
+// lipgloss.Style.Width(N) sets the *content+padding* block width — the
+// 2 border cols are added on top. With Padding(0,1) on the border style
+// (BannerBorder/PanelBorder), Width(N) renders an outer box of N+2 cols
+// and a usable content area of N-2 cols. To match Panel (which is hand
+// drawn at exactly `width` outer cols), we pass Width(width-2) so the
+// banner ends up at the same outer width and never sits 2 cols narrower
+// than the cyan panels stacked below it.
 func Banner(title, subtitle string, width int, border lipgloss.Style, titleStyle, subtleStyle lipgloss.Style) string {
 	if width < 20 {
 		width = 20
 	}
-	// Lipgloss adds 2 border + 2 horizontal padding columns when the
-	// caller's style sets Padding(0, 1) (BannerBorder/PanelBorder do).
-	// We size the inner block to width - 4 so the rendered box is
-	// exactly `width` columns wide.
-	inner := width - 4
-	if inner < 8 {
-		inner = 8
+	innerBlock := width - 2 // content + 2 padding cols
+	if innerBlock < 8 {
+		innerBlock = 8
 	}
-	titleLine := lipgloss.PlaceHorizontal(inner, lipgloss.Center,
-		titleStyle.Render(truncate(title, inner)))
+	contentW := innerBlock - 2 // subtract Padding(0,1) on each side
+	if contentW < 4 {
+		contentW = 4
+	}
+	titleLine := lipgloss.PlaceHorizontal(contentW, lipgloss.Center,
+		titleStyle.Render(truncate(title, contentW)))
 	body := titleLine
 	if subtitle != "" {
-		body += "\n" + lipgloss.PlaceHorizontal(inner, lipgloss.Center,
-			subtleStyle.Render(truncate(subtitle, inner)))
+		body += "\n" + lipgloss.PlaceHorizontal(contentW, lipgloss.Center,
+			subtleStyle.Render(truncate(subtitle, contentW)))
 	}
-	return border.Width(inner).Render(body)
+	return border.Width(innerBlock).Render(body)
 }
 
 // Panel renders a cyan double-bordered panel with an optional centered title
@@ -297,6 +305,12 @@ func Spinner(step int) string {
 
 // truncate shortens s to fit width using a trailing ellipsis. Returns s
 // unchanged when width is large enough.
+//
+// ANSI- and rune-safe: walks the string by rune, skipping any CSI escape
+// sequences, so a styled input like `\x1b[38;5;87mLabel\x1b[0m` collapses
+// to width by visual columns without chopping inside an escape (which
+// would corrupt subsequent terminal output) or inside a multi-byte rune
+// (which would produce U+FFFD glyphs).
 func truncate(s string, width int) string {
 	if width <= 0 || lipgloss.Width(s) <= width {
 		return s
@@ -304,12 +318,37 @@ func truncate(s string, width int) string {
 	if width <= 3 {
 		return strings.Repeat(".", width)
 	}
-	// Naive byte-trim is fine here because the strings we feed in are ASCII.
-	cut := width - 1
-	if cut > len(s) {
-		cut = len(s)
+	cap := width - 1 // reserve one cell for the ellipsis
+
+	var b strings.Builder
+	visible := 0
+	runes := []rune(s)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if r == 0x1b && i+1 < len(runes) && runes[i+1] == '[' {
+			// Copy CSI sequence verbatim — does not consume visual cols.
+			b.WriteRune(r)
+			i++
+			b.WriteRune(runes[i])
+			i++
+			for i < len(runes) {
+				b.WriteRune(runes[i])
+				if runes[i] >= '@' && runes[i] <= '~' {
+					break
+				}
+				i++
+			}
+			continue
+		}
+		w := lipgloss.Width(string(r))
+		if visible+w > cap {
+			break
+		}
+		b.WriteRune(r)
+		visible += w
 	}
-	return s[:cut] + "…"
+	b.WriteRune('…')
+	return b.String()
 }
 
 // wrapPlain wraps s into lines no wider than width, breaking on path

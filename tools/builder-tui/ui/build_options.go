@@ -250,10 +250,12 @@ func buildOptRow(key, label, value string, width int) string {
 	return buildOptRowStyled(key, label, value, ValueStyle, width)
 }
 
-// buildOptRowStyled is buildOptRow with explicit value style.
+// buildOptRowStyled is buildOptRow with explicit value style. Two-col
+// leading indent keeps the [N/I/C/X/F/S/B] bracket column lined up
+// with menu rows on every other screen.
 func buildOptRowStyled(key, label, value string, valStyle lipgloss.Style, width int) string {
 	tag := components.BracketTag(key, 1, HotKeyStyle)
-	prefix := tag + "  " + ValueStyle.Render(label)
+	prefix := "  " + tag + "  " + ValueStyle.Render(label)
 	rhs := valStyle.Render(value)
 	pad := width - lipgloss.Width(prefix) - lipgloss.Width(rhs)
 	return prefix + components.DotLeader(pad, MutedText) + rhs

@@ -276,17 +276,21 @@ func (s KSUScreen) View() string {
 	// ── Actions panel ───────────────────────────────────────────────────────
 	leader := lipgloss.NewStyle().Foreground(ColorMuted)
 	labelStyle := lipgloss.NewStyle().Foreground(ColorValue).Bold(true)
+	// 2-col leading indent so the [I/S/V/X/P] bracket column lines up
+	// vertically with the [P] tag in upstream branch table above and
+	// with `[X]` brackets across every other screen.
+	mw := innerW - 2
 	var act strings.Builder
-	act.WriteString(components.MenuRow("I", "Install / update",
-		"from active branch", innerW, 1,
+	act.WriteString("  " + components.MenuRow("I", "Install / update",
+		"from active branch", mw, 1,
 		HotKeyStyle, labelStyle, MutedText, leader) + "\n")
-	act.WriteString(components.MenuRow("S", "Switch", "main ↔ dev", innerW, 1,
+	act.WriteString("  " + components.MenuRow("S", "Switch", "main ↔ dev", mw, 1,
 		HotKeyStyle, labelStyle, MutedText, leader) + "\n")
-	act.WriteString(components.MenuRow("V", "Verify guards", "lint hook patterns", innerW, 1,
+	act.WriteString("  " + components.MenuRow("V", "Verify guards", "lint hook patterns", mw, 1,
 		HotKeyStyle, labelStyle, MutedText, leader) + "\n")
-	act.WriteString(components.MenuRow("X", "Remove driver", "uninstall + clean", innerW, 1,
+	act.WriteString("  " + components.MenuRow("X", "Remove driver", "uninstall + clean", mw, 1,
 		HotKeyStyle, labelStyle, MutedText, leader) + "\n")
-	act.WriteString(components.MenuRow("P", "Re-probe", "refresh upstream state", innerW, 1,
+	act.WriteString("  " + components.MenuRow("P", "Re-probe", "refresh upstream state", mw, 1,
 		HotKeyStyle, labelStyle, MutedText, leader))
 	actPanel := components.Panel("Actions", act.String(), w, PanelBorder, TitleStyle)
 

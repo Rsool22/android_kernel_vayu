@@ -273,18 +273,20 @@ func (s ToolchainScreen) View() string {
 
 	// ── Actions panel ───────────────────────────────────────────────────────
 	leader := lipgloss.NewStyle().Foreground(ColorMuted)
+	labelSt := lipgloss.NewStyle().Foreground(ColorValue).Bold(true)
 	var act strings.Builder
-	act.WriteString(components.MenuRow("F", "Fetch",
-		"download + install selected target", inner, 1,
-		HotKeyStyle, lipgloss.NewStyle().Foreground(ColorValue).Bold(true),
-		MutedText, leader) + "\n")
-	act.WriteString(components.MenuRow("C", "Check Latest",
-		"query upstream, no install", inner, 1,
-		HotKeyStyle, lipgloss.NewStyle().Foreground(ColorValue).Bold(true),
-		MutedText, leader) + "\n")
-	act.WriteString(components.MenuRow("R", "Return", "to Mode Select", inner, 1,
-		HotKeyStyle, lipgloss.NewStyle().Foreground(ColorValue).Bold(true),
-		MutedText, leader))
+	// "  " prefix keeps the [F/C/R] bracket column aligned with the rest
+	// of the script (Source rows, Build Options, Main Menu) so brackets
+	// line up vertically across pages, not just within one panel.
+	mw := inner - 2
+	act.WriteString("  " + components.MenuRow("F", "Fetch",
+		"download + install selected target", mw, 1,
+		HotKeyStyle, labelSt, MutedText, leader) + "\n")
+	act.WriteString("  " + components.MenuRow("C", "Check Latest",
+		"query upstream, no install", mw, 1,
+		HotKeyStyle, labelSt, MutedText, leader) + "\n")
+	act.WriteString("  " + components.MenuRow("R", "Return", "to Mode Select", mw, 1,
+		HotKeyStyle, labelSt, MutedText, leader))
 	actPanel := components.Panel("Actions", act.String(), w, PanelBorder, TitleStyle)
 
 	return banner + "\n" + statePanel + "\n" + srcPanel + "\n" +
@@ -293,21 +295,29 @@ func (s ToolchainScreen) View() string {
 }
 
 // srcRow renders one source-selector row. selected = persisted active source;
-// hovered = cursor position. They render distinctly: selected gets the dot
-// marker + ACTIVE pill; hovered gets a `›` left chevron. The label is
-// dot-padded out to the panel's inner width so an ACTIVE pill sits flush
-// against the right edge — matching the dot-leader pattern used by the
-// main menu and Build Options rows.
+// hovered = cursor position. They render distinctly: selected gets the
+// `●` dot, hovered gets the `›` chevron, and a row that is both shows
+// both markers (`›●`) so the navigation arrow stays visible even when
+// it's sitting on the active source. The label is dot-padded out to the
+// panel's inner width so an ACTIVE pill sits flush against the right
+// edge — matching the dot-leader pattern used by the main menu and
+// Build Options rows.
 func srcRow(key, label string, selected, hovered bool, width int) string {
-	mark := "  "
-	switch {
-	case selected:
-		mark = SelText.Render(" ●")
-	case hovered:
-		mark = AccentText.Render(" ›")
+	// Two-char marker column so the [X] bracket sits at content
+	// column 2 across every page. Slot 0 holds the selection dot
+	// `●`, slot 1 holds the cursor chevron `›` (immediately left of
+	// the bracket, matching the main menu pattern). When the cursor
+	// is sitting on the active source, both are shown.
+	a, b := " ", " "
+	if selected {
+		a = SelText.Render("●")
 	}
+	if hovered {
+		b = AccentText.Render("›")
+	}
+	mark := a + b
 	tag := components.BracketTag(key, 1, HotKeyStyle)
-	prefix := mark + " " + tag + "  " +
+	prefix := mark + tag + "  " +
 		lipgloss.NewStyle().Foreground(ColorValue).Render(label)
 	rhs := ""
 	if selected {

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/features"
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/state"
@@ -233,29 +234,36 @@ func configMtime(p string) int64 {
 }
 
 // featureRow renders one feature row with [N] tag, label, and a status
-// badge. All four badge variants (ENABLED/DISABLED/N/A/NO DRIVER) are
-// padded to a fixed width so they line up across rows.
-func featureRow(num, name string, enabled, available, driver bool) string {
+// badge dot-leader-aligned to the right edge of the panel — matching
+// the [F]/[C]/[R] action rows on Toolchain and Build Options. All four
+// badge variants (ENABLED/DISABLED/N/A/NO DRIVER) are padded to a
+// fixed width so they line up across rows.
+func featureRow(num, name string, enabled, available, driver, hovered bool, width int) string {
 	const badgeW = 10
-	tag := components.BracketTag(num, 1, HotKeyStyle)
+	var nameStyle lipgloss.Style
+	var badge string
 	switch {
 	case !driver:
-		return "  " + tag + "  " +
-			ValueStyle.Render(name) + "  " +
-			components.Badge(padTo("NO DRIVER", badgeW), BadgeErr)
+		nameStyle = ValueStyle
+		badge = components.Badge(padTo("NO DRIVER", badgeW), BadgeErr)
 	case !available:
-		return "  " + tag + "  " +
-			DimText.Render(name) + "  " +
-			components.Badge(padTo("N/A", badgeW), BadgeWarn)
+		nameStyle = DimText
+		badge = components.Badge(padTo("N/A", badgeW), BadgeWarn)
 	case enabled:
-		return "  " + tag + "  " +
-			ValueStyle.Bold(true).Render(name) + "  " +
-			components.Badge(padTo("ENABLED", badgeW), BadgeOK)
+		nameStyle = ValueStyle.Bold(true)
+		badge = components.Badge(padTo("ENABLED", badgeW), BadgeOK)
 	default:
-		return "  " + tag + "  " +
-			DimText.Render(name) + "  " +
-			components.Badge(padTo("DISABLED", badgeW), BadgeAccent)
+		nameStyle = DimText
+		badge = components.Badge(padTo("DISABLED", badgeW), BadgeAccent)
 	}
+	mark := "  "
+	if hovered {
+		mark = AccentText.Render(" ›")
+	}
+	tag := components.BracketTag(num, 1, HotKeyStyle)
+	prefix := mark + tag + "  " + nameStyle.Render(name)
+	pad := width - lipgloss.Width(prefix) - lipgloss.Width(badge)
+	return prefix + components.DotLeader(pad, MutedText) + badge
 }
 
 func (s FeaturesScreen) View() string {
@@ -283,18 +291,10 @@ func (s FeaturesScreen) View() string {
 		{"2", "SuSFS     (CONFIG_KSU_SUSFS)", st.SUSFS, st.KSU},
 		{"3", "KPM       (CONFIG_KPM)", st.KPM, st.KSU},
 	}
+	inner := innerContentWidth(w)
 	var p strings.Builder
 	for i, r := range rows {
-		mark := "  "
-		if i == s.cursor {
-			mark = AccentText.Render(" ›")
-		}
-		row := featureRow(r.key, r.name, r.enabled, r.avail, driver)
-		// featureRow already starts with "  " — replace its leading marker
-		// with our cursor chevron when this is the active row.
-		if strings.HasPrefix(row, "  ") {
-			row = mark + row[2:]
-		}
+		row := featureRow(r.key, r.name, r.enabled, r.avail, driver, i == s.cursor, inner)
 		p.WriteString(row)
 		if i < len(rows)-1 {
 			p.WriteString("\n")
@@ -303,7 +303,6 @@ func (s FeaturesScreen) View() string {
 	togPanel := components.Panel("Toggles", p.String(), w, PanelBorder, TitleStyle)
 
 	// ── Summary panel ───────────────────────────────────────────────────────
-	inner := innerContentWidth(w)
 	valW := inner - 14 // 11 (label col) + " : "
 	var sm strings.Builder
 	sm.WriteString(components.KVWrap("Hook Mode", st.HookMode(), 11, valW, LabelStyle, AccentText) + "\n")
