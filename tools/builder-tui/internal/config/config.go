@@ -30,6 +30,14 @@ type Config struct {
 	AnyKernelDir string
 	// OutputDir, when set, overrides KBUILD_OUTPUT.
 	OutputDir string
+	// GCC64Dir is the directory containing aarch64-linux-gnu-* tools (default /usr/bin).
+	GCC64Dir string
+	// GCC32Dir is the directory containing arm-linux-gnueabi-* tools (default /usr/bin).
+	GCC32Dir string
+
+	// KernelName, when set, becomes the LOCALVERSION suffix on the next build.
+	// Cleared at the end of every build cycle (session-only persistence).
+	KernelName string
 
 	// ClangSource selects the upstream for fetches.
 	ClangSource ClangSource
@@ -106,6 +114,12 @@ func Load() (Config, error) {
 			c.AnyKernelDir = v
 		case "output_dir":
 			c.OutputDir = v
+		case "gcc64_dir":
+			c.GCC64Dir = v
+		case "gcc32_dir":
+			c.GCC32Dir = v
+		case "kernel_name":
+			c.KernelName = v
 		case "clang_source":
 			c.ClangSource = ClangSource(v)
 		case "zyc_target":
@@ -148,6 +162,9 @@ func (c Config) Save() error {
 	writeOpt("clang_dir", c.ClangDir)
 	writeOpt("anykernel_dir", c.AnyKernelDir)
 	writeOpt("output_dir", c.OutputDir)
+	writeOpt("gcc64_dir", c.GCC64Dir)
+	writeOpt("gcc32_dir", c.GCC32Dir)
+	writeOpt("kernel_name", c.KernelName)
 	writeOpt("clang_source", string(c.ClangSource))
 	writeOpt("zyc_target", c.ZyCTarget)
 	writeOpt("google_target", c.GoogleTarget)
