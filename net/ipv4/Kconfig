@@ -705,8 +705,8 @@ choice
 	config DEFAULT_BIC
 		bool "Bic" if TCP_CONG_BIC=y
 
-        config DEFAULT_CUBIC
-                bool "Cubic" if TCP_CONG_CUBIC=y
+	config DEFAULT_CUBIC
+		bool "Cubic" if TCP_CONG_CUBIC=y
 
 	config DEFAULT_HTCP
 		bool "Htcp" if TCP_CONG_HTCP=y
@@ -749,7 +749,7 @@ config TCP_CONG_CUBIC
 config DEFAULT_TCP_CONG
 	string
 	default "bic" if DEFAULT_BIC
-        default "cubic" if DEFAULT_CUBIC
+	default "cubic" if DEFAULT_CUBIC
 	default "htcp" if DEFAULT_HTCP
 	default "hybla" if DEFAULT_HYBLA
 	default "vegas" if DEFAULT_VEGAS
