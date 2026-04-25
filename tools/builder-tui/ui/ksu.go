@@ -294,9 +294,11 @@ func (s KSUScreen) View() string {
 		HotKeyStyle, labelStyle, MutedText, leader))
 	actPanel := components.Panel("Actions", act.String(), w, PanelBorder, TitleStyle)
 
-	return banner + "\n" + selPanel + "\n" + upsPanel + "\n" +
-		actPanel + "\n" + logPanel + "\n" +
-		"  " + HelpStyle.Render("Select [I/S/V/X/P]\u00a0\u00b7\u00a0esc to return") + "\n"
+	out := strings.Join([]string{
+		banner, selPanel, upsPanel, actPanel, logPanel,
+		"  " + HelpStyle.Render("Select [I/S/V/X/P]\u00a0\u00b7\u00a0esc to return"),
+	}, "\n")
+	return strings.TrimRight(out, "\n ")
 }
 
 // pathExists returns true when p exists (file or dir).

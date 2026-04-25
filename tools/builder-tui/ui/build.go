@@ -418,26 +418,43 @@ func (s BuildScreen) View() string {
 	}
 	stagesPanel := components.Panel("Pipeline", stages.String(), w, PanelBorder, TitleStyle)
 
-	// Compile output viewport (header rule + framed).
-	headLabel := lipgloss.NewStyle().Foreground(ColorBuild).Bold(true).Render(" Compiler output ")
-	headFillW := w - lipgloss.Width(headLabel)
-	if headFillW < 0 {
-		headFillW = 0
+	// Compile output viewport — only rendered once the build is actually
+	// running (or has produced output / a result). Skipping it on the
+	// idle "press [B] to start" screen avoids the empty 14-row rounded
+	// box that otherwise dominates the layout and makes the box look
+	// like it's "starting on a new line".
+	var vpBlock string
+	if s.running || len(s.lines) > 0 || s.result != nil {
+		headLabel := lipgloss.NewStyle().Foreground(ColorBuild).Bold(true).Render(" Compiler output ")
+		headFillW := w - lipgloss.Width(headLabel)
+		if headFillW < 0 {
+			headFillW = 0
+		}
+		vpHeader := headLabel + MutedText.Render(strings.Repeat("─", headFillW))
+		vpBlock = vpHeader + "\n" + s.vp.View()
 	}
-	vpHeader := headLabel + MutedText.Render(strings.Repeat("─", headFillW)) + "\n"
 
 	// Result panel (after pipeline finishes).
 	var resultPanel string
 	if s.result != nil {
-		resultPanel = "\n" + s.renderResultPanel(w, inner) + "\n"
+		resultPanel = s.renderResultPanel(w, inner)
 	}
 
-	out := banner + "\n" + stagesPanel + "\n" + vpHeader + s.vp.View() + resultPanel + "\n" +
-		"  " + HelpStyle.Render(s.helpLine()) + "\n"
-	if s.app.Toast != "" {
-		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
+	// Stitch the screen together with exactly one separating newline
+	// between blocks. Joining + TrimRight keeps trailing whitespace
+	// from accumulating at the bottom of the screen on tall terminals.
+	parts := []string{banner, stagesPanel}
+	if vpBlock != "" {
+		parts = append(parts, vpBlock)
 	}
-	return out
+	if resultPanel != "" {
+		parts = append(parts, resultPanel)
+	}
+	parts = append(parts, "  "+HelpStyle.Render(s.helpLine()))
+	if s.app.Toast != "" {
+		parts = append(parts, "  "+components.Toast(s.app.Toast, s.app.ToastErr))
+	}
+	return strings.TrimRight(strings.Join(parts, "\n"), "\n ")
 }
 
 // stageRow renders one pipeline stage line: `[#] Name      RUNNING  detail`.

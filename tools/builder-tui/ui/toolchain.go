@@ -134,27 +134,16 @@ func (s ToolchainScreen) Update(msg tea.Msg) (ToolchainScreen, tea.Cmd) {
 			}
 			return s, nil
 		case "g":
-			s.app.Cfg.ClangSource = config.ClangGoogle
-			s.app.PersistConfig()
-			s.log.OK("target → " + sourceLabel(s.app.Cfg))
+			s.applySource(sourceItem{source: config.ClangGoogle})
 			s.cursor = 0
 		case "2":
-			s.app.Cfg.ClangSource = config.ClangZyC
-			s.app.Cfg.ZyCTarget = "23"
-			s.app.PersistConfig()
-			s.log.OK("target → " + sourceLabel(s.app.Cfg))
+			s.applySource(sourceItem{source: config.ClangZyC, zycTag: "23"})
 			s.cursor = 1
 		case "1":
-			s.app.Cfg.ClangSource = config.ClangZyC
-			s.app.Cfg.ZyCTarget = "15"
-			s.app.PersistConfig()
-			s.log.OK("target → " + sourceLabel(s.app.Cfg))
+			s.applySource(sourceItem{source: config.ClangZyC, zycTag: "15"})
 			s.cursor = 2
 		case "l":
-			s.app.Cfg.ClangSource = config.ClangZyC
-			s.app.Cfg.ZyCTarget = "latest"
-			s.app.PersistConfig()
-			s.log.OK("target → " + sourceLabel(s.app.Cfg))
+			s.applySource(sourceItem{source: config.ClangZyC, zycTag: "latest"})
 			s.cursor = 3
 		case "r", "b":
 			s.app.Screen = ScreenMain
@@ -289,9 +278,11 @@ func (s ToolchainScreen) View() string {
 		HotKeyStyle, labelSt, MutedText, leader))
 	actPanel := components.Panel("Actions", act.String(), w, PanelBorder, TitleStyle)
 
-	return banner + "\n" + statePanel + "\n" + srcPanel + "\n" +
-		actPanel + "\n" + logPanel + "\n" +
-		"  " + HelpStyle.Render("Select [G/2/1/L/F/C/R]\u00a0\u00b7\u00a0esc to return") + "\n"
+	out := strings.Join([]string{
+		banner, statePanel, srcPanel, actPanel, logPanel,
+		"  " + HelpStyle.Render("Select [G/2/1/L/F/C/R]\u00a0\u00b7\u00a0esc to return"),
+	}, "\n")
+	return strings.TrimRight(out, "\n ")
 }
 
 // srcRow renders one source-selector row. selected = persisted active source;
