@@ -21,48 +21,106 @@ var Width = 80
 
 // StyleVariant selects the visual mode. "bash" (default) replicates the
 // chunky double-line bordered look of the original build.sh; "modern" uses
-// a softer rounded-corner aesthetic with a subdued palette. Set via the
-// --style flag in cmd/root.go before the App starts rendering.
+// a softer rounded-corner aesthetic with a subdued palette; "ocean" /
+// "forest" / "mono" are alternative palettes accessible through the theme
+// picker on the Setup screen ([C] = Customize Theme). Set via the --style
+// flag in cmd/root.go *or* the persisted Cfg.Theme before App starts.
 type StyleVariant int
 
 const (
 	StyleBash StyleVariant = iota
 	StyleModern
+	StyleOcean
+	StyleForest
+	StyleMono
 )
+
+// StyleNames is the ordered set of preset theme names exposed in the
+// theme picker. Index matches the StyleVariant values above.
+var StyleNames = []string{"bash", "modern", "ocean", "forest", "mono"}
+
+// ParseStyle maps a name back to a StyleVariant; returns StyleBash for
+// unknown names so a stale config never breaks the UI.
+func ParseStyle(name string) StyleVariant {
+	for i, n := range StyleNames {
+		if n == name {
+			return StyleVariant(i)
+		}
+	}
+	return StyleBash
+}
 
 // CurrentStyle is the active variant. Changed at most once during init.
 var CurrentStyle StyleVariant = StyleBash
 
 // ApplyStyle swaps the package-level styles to match v. Call once before
-// tea.NewProgram.Run().
+// tea.NewProgram.Run() — and again from the Setup theme picker when the
+// user switches themes at runtime.
 func ApplyStyle(v StyleVariant) {
 	CurrentStyle = v
+	// Each branch sets the palette colours; the border + style derivations
+	// at the bottom are shared so we only have one place where the actual
+	// lipgloss.Style values are constructed (consistency across themes).
+	border := lipgloss.DoubleBorder()
 	switch v {
 	case StyleModern:
-		ColorBanner = lipgloss.Color("99")  // soft purple
-		ColorPanel = lipgloss.Color("75")   // periwinkle
-		ColorTitle = lipgloss.Color("117")  // sky
-		ColorAccent = lipgloss.Color("141") // lavender
-		ColorHotKey = lipgloss.Color("215") // peach
-		BannerBorder = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder(), true).
-			BorderForeground(ColorBanner).
-			Padding(0, 1)
-		PanelBorder = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder(), true).
-			BorderForeground(ColorPanel).
-			Padding(0, 1)
-		PanelOK = PanelBorder.BorderForeground(ColorOK)
-		PanelWarn = PanelBorder.BorderForeground(ColorWarn)
-		PanelErr = PanelBorder.BorderForeground(ColorErr)
-		PanelDim = PanelBorder.BorderForeground(ColorMuted)
-		TitleStyle = lipgloss.NewStyle().Foreground(ColorTitle).Bold(true)
-		BannerTitle = lipgloss.NewStyle().Foreground(ColorValue).Bold(true)
-		BannerSubtle = lipgloss.NewStyle().Foreground(ColorAccent).Italic(true)
-		SubtitleStyle = lipgloss.NewStyle().Foreground(ColorAccent)
-		HotKeyStyle = lipgloss.NewStyle().Foreground(ColorHotKey).Bold(true)
-		AccentText = lipgloss.NewStyle().Foreground(ColorAccent)
+		ColorBanner = lipgloss.Color("99")
+		ColorPanel = lipgloss.Color("75")
+		ColorTitle = lipgloss.Color("117")
+		ColorValue = lipgloss.Color("231")
+		ColorAccent = lipgloss.Color("141")
+		ColorHotKey = lipgloss.Color("215")
+		ColorBuild = lipgloss.Color("117")
+		border = lipgloss.RoundedBorder()
+	case StyleOcean:
+		ColorBanner = lipgloss.Color("39")  // azure
+		ColorPanel = lipgloss.Color("45")   // teal
+		ColorTitle = lipgloss.Color("159")  // pale cyan
+		ColorValue = lipgloss.Color("231")
+		ColorAccent = lipgloss.Color("87")  // soft cyan
+		ColorHotKey = lipgloss.Color("226") // lemon
+		ColorBuild = lipgloss.Color("39")
+	case StyleForest:
+		ColorBanner = lipgloss.Color("28")  // pine
+		ColorPanel = lipgloss.Color("34")   // grass
+		ColorTitle = lipgloss.Color("190")  // chartreuse
+		ColorValue = lipgloss.Color("231")
+		ColorAccent = lipgloss.Color("154") // lime
+		ColorHotKey = lipgloss.Color("214") // amber
+		ColorBuild = lipgloss.Color("34")
+	case StyleMono:
+		ColorBanner = lipgloss.Color("250")
+		ColorPanel = lipgloss.Color("245")
+		ColorTitle = lipgloss.Color("255")
+		ColorValue = lipgloss.Color("255")
+		ColorAccent = lipgloss.Color("250")
+		ColorHotKey = lipgloss.Color("231")
+		ColorBuild = lipgloss.Color("245")
+	default: // StyleBash
+		ColorBanner = lipgloss.Color("201")
+		ColorPanel = lipgloss.Color("51")
+		ColorTitle = lipgloss.Color("220")
+		ColorValue = lipgloss.Color("231")
+		ColorAccent = lipgloss.Color("87")
+		ColorHotKey = lipgloss.Color("214")
+		ColorBuild = lipgloss.Color("117")
 	}
+
+	BannerBorder = lipgloss.NewStyle().Border(border, true).
+		BorderForeground(ColorBanner).Padding(0, 1)
+	PanelBorder = lipgloss.NewStyle().Border(border, true).
+		BorderForeground(ColorPanel).Padding(0, 1)
+	PanelOK = PanelBorder.BorderForeground(ColorOK)
+	PanelWarn = PanelBorder.BorderForeground(ColorWarn)
+	PanelErr = PanelBorder.BorderForeground(ColorErr)
+	PanelDim = PanelBorder.BorderForeground(ColorMuted)
+	TitleStyle = lipgloss.NewStyle().Foreground(ColorTitle).Bold(true)
+	BannerTitle = lipgloss.NewStyle().Foreground(ColorValue).Bold(true)
+	BannerSubtle = lipgloss.NewStyle().Foreground(ColorAccent).Italic(true)
+	SubtitleStyle = lipgloss.NewStyle().Foreground(ColorAccent)
+	HotKeyStyle = lipgloss.NewStyle().Foreground(ColorHotKey).Bold(true)
+	AccentText = lipgloss.NewStyle().Foreground(ColorAccent)
+	ValueStyle = lipgloss.NewStyle().Foreground(ColorValue).Bold(true)
 }
 
 // Palette adapted from the bash TUI:

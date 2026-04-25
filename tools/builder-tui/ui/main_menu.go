@@ -10,12 +10,40 @@ import (
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/ui/components"
 )
 
-// MainMenu is the entry screen. Hotkeys: B/P/T/K/F/S/Q.
+// MainMenu is the entry screen, the strict 1:1 port of the bash
+// `run_mode_menu`. Hotkeys: B / [P] / T / M / S / Q. ↑/↓ + Enter also
+// navigate; Enter activates the highlighted row. The Features and
+// Dependencies sub-screens are reachable only inside the Build flow and the
+// Setup wrapper respectively (matching the bash structure), not from the
+// top-level menu.
 type MainMenu struct {
-	app *App
+	app    *App
+	cursor int
 }
 
 func NewMainMenu(a *App) MainMenu { return MainMenu{app: a} }
+
+// menuActionKey returns the hotkey letter for the row at index i in the
+// dynamic menu list (which omits [P] when no image exists).
+func (m MainMenu) menuActionKey(i int) string {
+	keys := []string{"b"}
+	if m.app.HasImage {
+		keys = append(keys, "p")
+	}
+	keys = append(keys, "t", "m", "s", "q")
+	if i >= 0 && i < len(keys) {
+		return keys[i]
+	}
+	return ""
+}
+
+func (m MainMenu) menuLen() int {
+	n := 5 // B + T M S Q
+	if m.app.HasImage {
+		n++
+	}
+	return n
+}
 
 func (m MainMenu) Init() tea.Cmd { return nil }
 
@@ -28,13 +56,34 @@ func (m MainMenu) pathsLocked() bool {
 func (m MainMenu) Update(msg tea.Msg) (MainMenu, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch strings.ToLower(msg.String()) {
+		key := strings.ToLower(msg.String())
+		// Arrow-key + Enter navigation. j/k vim aliases were dropped here
+		// because lowercasing them collided with the M (ReSukiSU) hotkey
+		// in the bash original.
+		switch key {
+		case "up":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+			return m, nil
+		case "down":
+			if m.cursor < m.menuLen()-1 {
+				m.cursor++
+			}
+			return m, nil
+		case "enter":
+			key = m.menuActionKey(m.cursor)
+		}
+		switch key {
 		case "b":
 			if m.pathsLocked() {
 				m.app.Toast = "Cannot build — fix Clang / AnyKernel3 paths in Setup first"
 				m.app.ToastErr = true
 				return m, nil
 			}
+			// B drives directly into Build Options; from there [S] starts
+			// the linear compile → package pipeline. Feature toggles live
+			// behind [F] inside Build Options, not in this linear path.
 			m.app.Screen = ScreenBuildOptions
 			return m, m.app.buildOpts.Init()
 		case "p":
@@ -57,18 +106,12 @@ func (m MainMenu) Update(msg tea.Msg) (MainMenu, tea.Cmd) {
 		case "t":
 			m.app.Screen = ScreenToolchain
 			return m, m.app.toolchain.Init()
-		case "k":
+		case "m":
 			m.app.Screen = ScreenKSU
 			return m, m.app.ksu.Init()
-		case "f":
-			m.app.Screen = ScreenFeatures
-			return m, m.app.features.Init()
 		case "s":
 			m.app.Screen = ScreenSetup
 			return m, m.app.setup.Init()
-		case "d":
-			m.app.Screen = ScreenDeps
-			return m, m.app.deps.Init()
 		}
 	}
 	return m, nil
@@ -100,18 +143,22 @@ func (m MainMenu) View() string {
 			DimText.Render("No previous build recorded")))
 	} else {
 		const lblW = 14
+		valW := innerW - lblW - 3 // " : "
+		if valW < 8 {
+			valW = 8
+		}
 		buildLine := fmt.Sprintf("#%d", pb.Num)
 		if pb.Date != "" {
 			buildLine = buildLine + "   " + pb.Date
 		}
-		prevBody.WriteString(components.KV("Build", buildLine, lblW, LabelStyle, DimText))
+		prevBody.WriteString(components.KVWrap("Build", buildLine, lblW, valW, LabelStyle, DimText))
 		if pb.KernelName != "" {
 			prevBody.WriteString("\n")
-			prevBody.WriteString(components.KV("Kernel-Name", pb.KernelName, lblW, LabelStyle, DimText))
+			prevBody.WriteString(components.KVWrap("Kernel-Name", pb.KernelName, lblW, valW, LabelStyle, DimText))
 		}
 		if pb.Mode != "" {
 			prevBody.WriteString("\n")
-			prevBody.WriteString(components.KV("Mode", pb.Mode, lblW, LabelStyle, DimText))
+			prevBody.WriteString(components.KVWrap("Mode", pb.Mode, lblW, valW, LabelStyle, DimText))
 		}
 		prevBody.WriteString("\n")
 		prevBody.WriteString(components.Separator(innerW, MutedText))
@@ -120,38 +167,15 @@ func (m MainMenu) View() string {
 		if cap == "" {
 			cap = "Unknown"
 		}
-		prevBody.WriteString(components.KV("Capabilities", cap, lblW, LabelStyle, DimText))
+		prevBody.WriteString(components.KVWrap("Capabilities", cap, lblW, valW, LabelStyle, DimText))
 		ext := pb.ExtFeat
 		if ext == "" {
 			ext = "[None]"
 		}
 		prevBody.WriteString("\n")
-		prevBody.WriteString(components.KV("Features", ext, lblW, LabelStyle, DimText))
+		prevBody.WriteString(components.KVWrap("Features", ext, lblW, valW, LabelStyle, DimText))
 	}
 	prevPanel := components.Panel("Previous Build", prevBody.String(), w, PanelDim, DimText.Bold(true))
-
-	// ── Environment status panel ────────────────────────────────────────────
-	var status strings.Builder
-	rows := []struct {
-		key, val string
-		bad      bool
-	}{
-		{"Kernel", okOr(m.app.Paths.Kernel, "(not found)"), m.app.Paths.Kernel == ""},
-		{"Clang", okOr(m.app.Paths.Clang, "(not installed)"), m.app.Paths.Clang == ""},
-		{"AnyKernel3", okOr(m.app.Paths.AnyKernel, "(not found)"), m.app.Paths.AnyKernel == ""},
-		{"Distro", string(m.app.Paths.Distro), false},
-	}
-	for i, r := range rows {
-		v := ValueStyle
-		if r.bad {
-			v = ErrText
-		}
-		status.WriteString(components.KV(r.key, r.val, 11, LabelStyle, v))
-		if i < len(rows)-1 {
-			status.WriteString("\n")
-		}
-	}
-	statusPanel := components.Panel("Environment", status.String(), w, PanelBorder, TitleStyle)
 
 	// ── Menu panel ───────────────────────────────────────────────────────────
 	type menuItem struct {
@@ -164,18 +188,16 @@ func (m MainMenu) View() string {
 		branchTag = "main"
 	}
 	items := []menuItem{
-		{"B", "Build kernel", "options → compile → package", ColorOK, m.pathsLocked()},
+		{"B", "Full Build", "configure → compile → package", ColorOK, m.pathsLocked()},
 	}
 	if m.app.HasImage {
-		items = append(items, menuItem{"P", "Package existing image", "skip compile", ColorOK, m.pathsLocked()})
+		items = append(items, menuItem{"P", "Package Existing Image", "skip compile", ColorOK, m.pathsLocked()})
 	}
 	items = append(items,
-		menuItem{"T", "Toolchain manager", "Google AOSP / ZyC", ColorAccent, false},
-		menuItem{"K", "ReSukiSU driver", "branch: " + branchTag, ColorWarn, false},
-		menuItem{"F", "Feature toggles", "KSU / SuSFS / KPM / menuconfig", ColorAccent, false},
-		menuItem{"S", "Setup / paths", "edit 6 path slots", ColorAccent, false},
-		menuItem{"D", "Dependency check", "host packages probe", ColorAccent, false},
-		menuItem{"Q", "Quit", "exit builder", ColorMuted, false},
+		menuItem{"T", "Toolchain Manager", "fetch/update ZyC Clang", ColorAccent, false},
+		menuItem{"M", "ReSukiSU Driver Manager", "branch: " + branchTag, ColorWarn, false},
+		menuItem{"S", "Setup", "paths + dependencies", ColorAccent, false},
+		menuItem{"Q", "Quit", "", ColorMuted, false},
 	)
 	var menu strings.Builder
 	leader := lipgloss.NewStyle().Foreground(ColorMuted)
@@ -194,15 +216,20 @@ func (m MainMenu) View() string {
 			rhs = "BLOCKED — fix paths first"
 			rhsStyle = ErrText
 		}
-		row := components.MenuRow(it.key, it.label, rhs, innerW, maxKey,
+		// 2-char marker before the row so highlighted row gets a chevron.
+		mark := "  "
+		if i == m.cursor {
+			mark = AccentText.Render(" ›")
+		}
+		row := components.MenuRow(it.key, it.label, rhs, innerW-2, maxKey,
 			HotKeyStyle, labelStyle, rhsStyle, leader,
 		)
-		menu.WriteString(row)
+		menu.WriteString(mark + row)
 		if i < len(items)-1 {
 			menu.WriteString("\n")
 		}
 	}
-	menuPanel := components.Panel("Menu", menu.String(), w, PanelBorder, TitleStyle)
+	menuPanel := components.Panel("Select Mode", menu.String(), w, PanelBorder, TitleStyle)
 
 	// ── Conditional banners ──────────────────────────────────────────────────
 	var extras strings.Builder
@@ -233,24 +260,21 @@ func (m MainMenu) View() string {
 		toast = "  " + components.Toast(m.app.Toast, m.app.ToastErr) + "\n"
 	}
 
-	// Build the option string dynamically: [B/P/T/K/F/S/Q]
+	// Build the option string dynamically: [B/P/T/M/S/Q]
 	opts := []string{"B"}
 	if m.app.HasImage {
 		opts = append(opts, "P")
 	}
-	opts = append(opts, "T", "K", "F", "S", "D", "Q")
+	opts = append(opts, "T", "M", "S", "Q")
 	help := HelpStyle.Render(fmt.Sprintf(
-		"  press [%s] · esc/q to quit · terminal %dx%d",
+		"  Select [%s] · esc/q to quit · terminal %dx%d",
 		strings.Join(opts, "/"), m.app.Width, m.app.Height,
 	))
 
-	divider := "  " + components.Separator(innerW, MutedText) + "\n"
 	return banner + "\n" +
 		prevPanel + "\n" +
-		statusPanel + "\n" +
 		menuPanel + "\n" +
 		extras.String() +
-		divider +
 		toast +
 		help
 }
@@ -277,30 +301,42 @@ func clampWidth(w, min, max int) int {
 	return w
 }
 
-// panelWidth returns the screen width used for banners/panels: the full
-// terminal width minus a 2-column right gutter so trailing borders never
-// touch the right edge of the terminal (looks much cleaner on most emulators).
+// panelWidth returns the outer width used for banners and panels. The
+// returned value is the full rendered box width, including the left and
+// right border columns; callers pass this directly to components.Banner /
+// components.Panel without subtracting anything else.
+//
+// Behaviour:
+//   - On a normal terminal we use the full width with no upper clamp so
+//     wide SSH terminals get to use the space (the bash original does the
+//     same via `set_width`).
+//   - We always reserve a single-column right gutter, so the right border
+//     never hugs the very last terminal column — some emulators (notably
+//     macOS Terminal and PuTTY) will wrap the next character to a new
+//     line if a glyph lands on the final column.
+//   - On very narrow screens (mobile SSH) we clamp to 24 to keep the box
+//     drawable. Below that the UI degrades to label-only rows.
 func panelWidth(termWidth int) int {
 	if termWidth <= 0 {
 		termWidth = 80
 	}
-	w := termWidth - 2
-	if w < 60 {
-		w = 60
-	}
-	if w > 160 {
-		w = 160
+	w := termWidth - 1
+	if w < 24 {
+		w = 24
 	}
 	return w
 }
 
-// innerContentWidth is the visible content area inside a panel after
-// border (2) + horizontal padding (2). Used to size MenuRow leaders, KV
-// padding, etc.
+// innerContentWidth is the visible content area inside a panel, i.e. the
+// number of columns available for body text after lipgloss subtracts both
+// borders (2) and the horizontal padding (2 — one column on each side).
+// Used by callers that need to size MenuRow leaders, KV padding, etc.
 func innerContentWidth(outerWidth int) int {
 	w := outerWidth - 4
-	if w < 20 {
-		w = 20
+	if w < 8 {
+		w = 8
 	}
 	return w
 }
+
+

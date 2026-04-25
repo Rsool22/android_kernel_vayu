@@ -140,9 +140,21 @@ func (s BuildOptionsScreen) Update(msg tea.Msg) (BuildOptionsScreen, tea.Cmd) {
 			}
 			s.app.Screen = ScreenBuild
 			return s, s.app.build.Init()
-		case "b":
-			s.app.Screen = ScreenFeatures
+		case "b", "esc":
+			// Back to Mode Select — the linear pipeline is
+			//   Main → BuildOptions → [S] → do_build (compile → package).
+			// Feature toggles are reachable here through [F] but never
+			// gate this back-arrow.
+			s.app.Screen = ScreenMain
 			return s, nil
+		case "f":
+			// Optional jump to Feature Configuration (KSU / SuSFS / KPM
+			// toggles + Menuconfig). Returning from there with [C] or
+			// [B] lands back here — it never auto-advances to Build.
+			s.app.Screen = ScreenFeatures
+			return s, s.app.features.Init()
+		case "q":
+			return s, tea.Quit
 		}
 	}
 	return s, nil
@@ -161,10 +173,14 @@ func (s BuildOptionsScreen) View() string {
 
 	// ── Active Features summary panel ───────────────────────────────────────
 	st := readDefconfigState(s.app)
+	valW := inner - 14 - 3 // " : "
+	if valW < 8 {
+		valW = 8
+	}
 	var sm strings.Builder
-	sm.WriteString(components.KV("Capabilities", st.CapTag(s.app.Builder.KSUBranch), 14, LabelStyle, ValueStyle) + "\n")
-	sm.WriteString(components.KV("Features", st.ExtTag(), 14, LabelStyle, ValueStyle) + "\n")
-	sm.WriteString(components.KV("Hook Mode", st.HookMode(), 14, LabelStyle, AccentText))
+	sm.WriteString(components.KVWrap("Capabilities", st.CapTag(s.app.Builder.KSUBranch), 14, valW, LabelStyle, ValueStyle) + "\n")
+	sm.WriteString(components.KVWrap("Features", st.ExtTag(), 14, valW, LabelStyle, ValueStyle) + "\n")
+	sm.WriteString(components.KVWrap("Hook Mode", st.HookMode(), 14, valW, LabelStyle, AccentText))
 	summaryPanel := components.Panel("Active Features", sm.String(), w, PanelBorder, TitleStyle)
 
 	// ── Toggles + actions panel ─────────────────────────────────────────────
@@ -204,9 +220,12 @@ func (s BuildOptionsScreen) View() string {
 		fmt.Sprintf("next #%s → #1", strconv.Itoa(next)), AccentText, inner) + "\n")
 	body.WriteString(components.Separator(inner, MutedText) + "\n")
 
+	body.WriteString(buildOptRowStyled("F", "Feature Configuration",
+		"KSU / SuSFS / KPM toggles", AccentText, inner) + "\n")
+	body.WriteString(components.Separator(inner, MutedText) + "\n")
 	body.WriteString(buildOptRowStyled("S", "Start Build",
 		fmt.Sprintf("compile + package as #%s", strconv.Itoa(next)), OKText, inner) + "\n")
-	body.WriteString(buildOptRowStyled("B", "Back", "to Features", LabelStyle, inner))
+	body.WriteString(buildOptRowStyled("B", "Back", "to Mode Select", LabelStyle, inner))
 	togglesPanel := components.Panel("Build Options", body.String(), w, PanelBorder, TitleStyle)
 
 	// ── Inline kernel-name editor ───────────────────────────────────────────
@@ -217,20 +236,8 @@ func (s BuildOptionsScreen) View() string {
 			w, PanelBorder.BorderForeground(ColorBanner), TitleStyle.Foreground(ColorBanner)) + "\n"
 	}
 
-	// ── Hotkey strip + toast + help ─────────────────────────────────────────
-	actions := components.HotkeyStrip([]components.Hotkey{
-		{Key: "N", Desc: "Name"},
-		{Key: "I", Desc: "Incr."},
-		{Key: "C", Desc: "ccache"},
-		{Key: "X", Desc: "Reset"},
-		{Key: "S", Desc: "Start"},
-		{Key: "B", Desc: "Back"},
-		{Key: "ESC", Desc: "Main"},
-	}, HotKeyStyle, ValueStyle, DimText, MutedText)
-
 	out := banner + "\n" + summaryPanel + "\n" + togglesPanel + editor + "\n" +
-		"  " + components.Separator(inner, MutedText) + "\n" +
-		"  " + actions + "\n"
+		"  " + HelpStyle.Render("Select [N/I/C/X/F/S/B]\u00a0\u00b7\u00a0esc to return") + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}
@@ -243,17 +250,15 @@ func buildOptRow(key, label, value string, width int) string {
 	return buildOptRowStyled(key, label, value, ValueStyle, width)
 }
 
-// buildOptRowStyled is buildOptRow with explicit value style.
+// buildOptRowStyled is buildOptRow with explicit value style. Two-col
+// leading indent keeps the [N/I/C/X/F/S/B] bracket column lined up
+// with menu rows on every other screen.
 func buildOptRowStyled(key, label, value string, valStyle lipgloss.Style, width int) string {
 	tag := components.BracketTag(key, 1, HotKeyStyle)
-	prefix := tag + "  " + ValueStyle.Render(label)
+	prefix := "  " + tag + "  " + ValueStyle.Render(label)
 	rhs := valStyle.Render(value)
-	pad := width - lipgloss.Width(prefix) - lipgloss.Width(rhs) - 2
-	if pad < 1 {
-		pad = 1
-	}
-	leader := MutedText.Render(" " + strings.Repeat("·", pad-2) + " ")
-	return prefix + leader + rhs
+	pad := width - lipgloss.Width(prefix) - lipgloss.Width(rhs)
+	return prefix + components.DotLeader(pad, MutedText) + rhs
 }
 
 func knameValue(v string) string {

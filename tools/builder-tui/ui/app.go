@@ -24,6 +24,7 @@ const (
 	ScreenFeatures
 	ScreenBuildOptions
 	ScreenDeps
+	ScreenPaths
 )
 
 // Program is set by the entrypoint (cmd.Execute) once tea.NewProgram returns,
@@ -68,6 +69,7 @@ type App struct {
 	ksu        KSUScreen
 	build      BuildScreen
 	setup      SetupScreen
+	paths      PathsScreen
 	features   FeaturesScreen
 	buildOpts  BuildOptionsScreen
 	deps       DepsScreen
@@ -75,7 +77,9 @@ type App struct {
 
 // NewApp constructs the root app and pre-runs path autodiscovery.
 func NewApp(cfg config.Config) *App {
-	p, _ := discover.Resolve(".", cfg.KernelDir, cfg.ClangDir, cfg.AnyKernelDir, cfg.OutputDir)
+	p, _ := discover.Resolve(".",
+		cfg.KernelDir, cfg.ClangDir, cfg.AnyKernelDir, cfg.OutputDir,
+		cfg.GCC64Dir, cfg.GCC32Dir)
 	a := &App{
 		Cfg:    cfg,
 		Paths:  p,
@@ -89,6 +93,7 @@ func NewApp(cfg config.Config) *App {
 	a.ksu = NewKSUScreen(a)
 	a.build = NewBuildScreen(a)
 	a.setup = NewSetupScreen(a)
+	a.paths = NewPathsScreen(a)
 	a.features = NewFeaturesScreen(a)
 	a.buildOpts = NewBuildOptionsScreen(a)
 	a.deps = NewDepsScreen(a)
@@ -128,6 +133,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		a.setup, cmd = a.setup.Update(msg)
 		cmds = append(cmds, cmd)
+		a.paths, cmd = a.paths.Update(msg)
+		cmds = append(cmds, cmd)
 		a.features, cmd = a.features.Update(msg)
 		cmds = append(cmds, cmd)
 		a.buildOpts, cmd = a.buildOpts.Update(msg)
@@ -140,13 +147,31 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			return a, tea.Quit
 		case "q":
-			if a.Screen == ScreenMain {
+			// q on Paths screen goes back to Setup wrapper, matching the
+			// bash do_paths_config behaviour. Same for Deps. Features
+			// ESCs back to BuildOptions (since BuildOptions opens it
+			// via [F]). All other non-main screens fall back to the
+			// main menu, except text fields where the child screen
+			// handles 'q' itself.
+			switch a.Screen {
+			case ScreenMain:
 				return a, tea.Quit
+			case ScreenPaths, ScreenDeps, ScreenFeatures, ScreenBuildOptions:
+				// Forward to child so it can route appropriately.
+			default:
+				a.Screen = ScreenMain
+				return a, nil
 			}
-			a.Screen = ScreenMain
-			return a, nil
 		case "esc":
-			if a.Screen != ScreenMain {
+			switch a.Screen {
+			case ScreenMain:
+				// no-op
+			case ScreenPaths, ScreenDeps, ScreenFeatures, ScreenBuildOptions:
+				// Forward to child so it routes appropriately:
+				//   Paths/Deps → Setup
+				//   Features   → BuildOptions
+				//   BuildOpts  → Main
+			default:
 				a.Screen = ScreenMain
 				return a, nil
 			}
@@ -185,6 +210,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.deps, cmd = a.deps.Update(msg)
 		return a, cmd
+	case ScreenPaths:
+		var cmd tea.Cmd
+		a.paths, cmd = a.paths.Update(msg)
+		return a, cmd
 	}
 	return a, nil
 }
@@ -206,6 +235,8 @@ func (a *App) View() string {
 		return a.buildOpts.View()
 	case ScreenDeps:
 		return a.deps.View()
+	case ScreenPaths:
+		return a.paths.View()
 	default:
 		return a.main.View()
 	}

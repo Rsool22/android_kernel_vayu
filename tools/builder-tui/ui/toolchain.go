@@ -17,21 +17,58 @@ import (
 
 // ToolchainScreen lets the user pick Google/ZyC/Auto, query upstream, and
 // fetch+install a clang toolchain.
+//
+// The screen exposes a unified source-row list that can be navigated by
+// hotkey OR arrow keys. Operation progress (download bytes, query results,
+// install status) is appended to the activity log panel — replacing the old
+// transient toast that was prone to duplicate / stale rendering.
 type ToolchainScreen struct {
 	app   *App
 	prog  progress.Model
 	busy  bool
 	stage string
-	last  string
+
+	// Cursor position within the source list (sources + ZyC sub-target rows
+	// when ZyC is the active source). Driven by ↑/↓ keys.
+	cursor int
+
+	// Most-recent download progress for the activity log "X of Y" line.
+	dlBytes int64
+	dlTotal int64
+	dlAt    time.Time
+
+	log *components.Activity
 }
 
 func NewToolchainScreen(a *App) ToolchainScreen {
 	p := progress.New(progress.WithGradient("#5fafff", "#5fffd7"))
 	p.Width = 60
-	return ToolchainScreen{app: a, prog: p}
+	return ToolchainScreen{
+		app:  a,
+		prog: p,
+		log:  components.NewActivity(),
+	}
 }
 
-func (s ToolchainScreen) Init() tea.Cmd { return nil }
+func (s ToolchainScreen) Init() tea.Cmd {
+	// ZyC is the default, but Google AOSP clang is also offered now;
+	// preserve any previously-saved Google selection. Migrate the legacy
+	// "Auto" mode to ZyC silently since the bash original only supports
+	// the two concrete vendors.
+	if s.app.Cfg.ClangSource == config.ClangAuto {
+		s.app.Cfg.ClangSource = config.ClangZyC
+		_ = s.app.Cfg.Save()
+	}
+	if s.app.Cfg.ZyCTarget == "" {
+		s.app.Cfg.ZyCTarget = "23"
+		_ = s.app.Cfg.Save()
+	}
+	if s.app.Cfg.GoogleTarget == "" {
+		s.app.Cfg.GoogleTarget = "latest"
+		_ = s.app.Cfg.Save()
+	}
+	return nil
+}
 
 // Messages used by the toolchain screen.
 type tcQueryDoneMsg struct {
@@ -41,6 +78,36 @@ type tcQueryDoneMsg struct {
 type tcDownloadProgressMsg struct{ done, total int64 }
 type tcInstallDoneMsg struct{ err error }
 
+// sourceItem describes one row in the navigable source list.
+type sourceItem struct {
+	hotkey string
+	desc   string
+	source config.ClangSource
+	zycTag string // e.g. "23", "15", "latest" — only used when source==ClangZyC
+}
+
+// sourceItems returns the rows currently rendered in the Source panel,
+// in display order. Two vendors are exposed: Google AOSP (single row) and
+// ZyC Clang (three version slots — 23.x / 15.x / latest).
+func (s ToolchainScreen) sourceItems() []sourceItem {
+	return []sourceItem{
+		{hotkey: "G", desc: "Google AOSP Clang  (main-kernel/clang)", source: config.ClangGoogle},
+		{hotkey: "2", desc: "ZyC Clang 23.x  (current)", source: config.ClangZyC, zycTag: "23"},
+		{hotkey: "1", desc: "ZyC Clang 15.x  (legacy)", source: config.ClangZyC, zycTag: "15"},
+		{hotkey: "L", desc: "ZyC Clang latest  (any version)", source: config.ClangZyC, zycTag: "latest"},
+	}
+}
+
+// applySource picks the row at cursor and persists it.
+func (s *ToolchainScreen) applySource(it sourceItem) {
+	s.app.Cfg.ClangSource = it.source
+	if it.source == config.ClangZyC && it.zycTag != "" {
+		s.app.Cfg.ZyCTarget = it.zycTag
+	}
+	s.app.PersistConfig()
+	s.log.OK("target → " + sourceLabel(s.app.Cfg))
+}
+
 func (s ToolchainScreen) Update(msg tea.Msg) (ToolchainScreen, tea.Cmd) {
 	switch m := msg.(type) {
 	case tea.KeyMsg:
@@ -48,35 +115,73 @@ func (s ToolchainScreen) Update(msg tea.Msg) (ToolchainScreen, tea.Cmd) {
 		if s.busy {
 			return s, nil
 		}
+		items := s.sourceItems()
 		switch key {
-		case "a":
-			s.app.Cfg.ClangSource = config.ClangAuto
-			s.app.PersistConfig()
+		case "up", "k":
+			if s.cursor > 0 {
+				s.cursor--
+			}
+			return s, nil
+		case "down", "j":
+			if s.cursor < len(items)-1 {
+				s.cursor++
+			}
+			return s, nil
+		case "enter", " ":
+			if s.cursor >= 0 && s.cursor < len(items) {
+				it := items[s.cursor]
+				s.applySource(it)
+			}
+			return s, nil
 		case "g":
-			s.app.Cfg.ClangSource = config.ClangGoogle
-			s.app.PersistConfig()
-		case "z":
-			s.app.Cfg.ClangSource = config.ClangZyC
-			s.app.PersistConfig()
-		case "l":
-			s.app.Cfg.ClangSource = config.ClangZyC
-			s.app.Cfg.ZyCTarget = "latest"
-			s.app.PersistConfig()
-		case "1":
-			s.app.Cfg.ClangSource = config.ClangZyC
-			s.app.Cfg.ZyCTarget = "15"
-			s.app.PersistConfig()
+			s.applySource(sourceItem{source: config.ClangGoogle})
+			s.cursor = 0
 		case "2":
-			s.app.Cfg.ClangSource = config.ClangZyC
-			s.app.Cfg.ZyCTarget = "23"
-			s.app.PersistConfig()
+			s.applySource(sourceItem{source: config.ClangZyC, zycTag: "23"})
+			s.cursor = 1
+		case "1":
+			s.applySource(sourceItem{source: config.ClangZyC, zycTag: "15"})
+			s.cursor = 2
+		case "l":
+			s.applySource(sourceItem{source: config.ClangZyC, zycTag: "latest"})
+			s.cursor = 3
+		case "d":
+			// Delete the currently-active stored toolchain (if any).
+			// Older versions stored alongside it stay on disk so the
+			// user can swap back to them with [F]etch (which skips the
+			// download when the slot is already extracted).
+			installed := clang.ListInstalled(s.app.Paths.Clang)
+			var active *clang.InstalledVersion
+			for i := range installed {
+				if installed[i].Active {
+					active = &installed[i]
+					break
+				}
+			}
+			if active == nil {
+				s.log.Warn("nothing to delete: no active toolchain")
+				return s, nil
+			}
+			label := active.Source + "-" + active.Tag
+			if err := clang.RemoveInstalled(s.app.Paths.Clang, *active); err != nil {
+				s.log.Err("delete failed: " + err.Error())
+			} else {
+				s.log.OK("deleted " + label)
+			}
+			return s, nil
+		case "r", "b":
+			s.app.Screen = ScreenMain
+			return s, nil
 		case "c":
 			s.busy = true
 			s.stage = "querying upstream"
+			s.log.Info("querying " + sourceLabel(s.app.Cfg) + " …")
 			return s, s.queryCmd()
 		case "f":
 			s.busy = true
 			s.stage = "querying upstream"
+			s.dlBytes, s.dlTotal = 0, 0
+			s.log.Info("fetch: querying " + sourceLabel(s.app.Cfg) + " …")
 			return s, s.queryThenFetchCmd()
 		}
 	case tcQueryDoneMsg:
@@ -86,27 +191,33 @@ func (s ToolchainScreen) Update(msg tea.Msg) (ToolchainScreen, tea.Cmd) {
 			if strings.Contains(msg, "rate limited") || strings.Contains(msg, "rate limit") {
 				msg += "  (set $ZYC_GH_TOKEN to lift the 60/h limit)"
 			}
-			s.app.Toast = "Query failed: " + msg
-			s.app.ToastErr = true
+			s.log.Err("query failed: " + msg)
 			return s, nil
 		}
-		s.last = fmt.Sprintf("%s : %s (%s)", m.rel.Source, m.rel.Tag, sizeStr(m.rel.SizeBytes))
-		s.app.Toast = "Latest " + s.last
-		s.app.ToastErr = false
+		s.log.OK(fmt.Sprintf("latest %s : %s (%s)", m.rel.Source, m.rel.Tag, sizeStr(m.rel.SizeBytes)))
 	case tcDownloadProgressMsg:
+		s.dlBytes = m.done
+		s.dlTotal = m.total
+		s.dlAt = time.Now()
+		// Log a progress line at most once per second so the panel doesn't
+		// fill up; ActProgress replaces the previous progress line in place.
 		if m.total > 0 {
-			cmd := s.prog.SetPercent(float64(m.done) / float64(m.total))
+			pct := float64(m.done) / float64(m.total)
+			s.log.Progress(fmt.Sprintf("downloading: %s / %s  (%d%%)",
+				humanBytes(m.done), humanBytes(m.total), int(pct*100)))
+			cmd := s.prog.SetPercent(pct)
 			return s, cmd
 		}
+		// Indeterminate (chunked) mode — surface bytes downloaded.
+		s.log.Progress(fmt.Sprintf("downloading: %s (size unknown)", humanBytes(m.done)))
+		return s, nil
 	case tcInstallDoneMsg:
 		s.busy = false
 		s.stage = ""
 		if m.err != nil {
-			s.app.Toast = "Install failed: " + m.err.Error()
-			s.app.ToastErr = true
+			s.log.Err("install failed: " + m.err.Error())
 		} else {
-			s.app.Toast = "Clang installed at " + s.app.Paths.Clang
-			s.app.ToastErr = false
+			s.log.OK("clang installed at " + s.app.Paths.Clang)
 		}
 		return s, nil
 	case progress.FrameMsg:
@@ -126,73 +237,131 @@ func (s ToolchainScreen) View() string {
 	// ── Banner ───────────────────────────────────────────────────────────────
 	banner := components.Banner(
 		"TOOLCHAIN  MANAGER",
-		"Google AOSP clang  ·  ZyC Clang fallback",
+		"github.com/ZyCromerZ/Clang  ·  Linux 4.14 NonGKI build",
 		w, BannerBorder, BannerTitle, BannerSubtle,
 	)
 
 	// ── Current state panel ─────────────────────────────────────────────────
+	valW := inner - 13 // 11 (label col) + " : "
 	var st strings.Builder
-	st.WriteString(components.KV("Source", sourceLabel(s.app.Cfg), 11, LabelStyle, ValueStyle) + "\n")
-	st.WriteString(components.KV("Origin", sourceOrigin(s.app.Cfg.ClangSource), 11, LabelStyle, AccentText) + "\n")
+	st.WriteString(components.KVWrap("Source", sourceLabel(s.app.Cfg), 11, valW, LabelStyle, ValueStyle) + "\n")
+	st.WriteString(components.KVWrap("Origin", sourceOrigin(s.app.Cfg.ClangSource), 11, valW, LabelStyle, AccentText) + "\n")
 	local := clang.LocalVersion(s.app.Paths.Clang)
 	if local == "" {
-		st.WriteString(components.KV("Local", "(not installed)", 11, LabelStyle, ErrText) + "\n")
+		st.WriteString(components.KVWrap("Local", "(not installed)", 11, valW, LabelStyle, ErrText) + "\n")
 	} else {
-		st.WriteString(components.KV("Local", local, 11, LabelStyle, OKText) + "\n")
+		st.WriteString(components.KVWrap("Local", local, 11, valW, LabelStyle, OKText) + "\n")
 	}
-	st.WriteString(components.KV("Install", okOr(s.app.Paths.Clang, "(unset)"), 11, LabelStyle, MutedText))
-	if s.last != "" {
-		st.WriteString("\n" + components.KV("Latest", s.last, 11, LabelStyle, OKText))
+	st.WriteString(components.KVWrap("Install", okOr(s.app.Paths.Clang, "(unset)"), 11, valW, LabelStyle, MutedText))
+	if installed := clang.ListInstalled(s.app.Paths.Clang); len(installed) > 0 {
+		st.WriteString("\n" + components.Separator(inner, MutedText))
+		for _, v := range installed {
+			marker := "  "
+			st1 := MutedText
+			if v.Active {
+				marker = SelText.Render("● ")
+				st1 = OKText
+			}
+			line := marker + st1.Render(fmt.Sprintf("%-7s %s", v.Source, v.Tag))
+			st.WriteString("\n" + line)
+		}
 	}
 	statePanel := components.Panel("State", st.String(), w, PanelBorder, TitleStyle)
 
-	// ── Source selector panel ───────────────────────────────────────────────
-	innerW := inner
+	// ── Source selector panel (cursor-navigable) ────────────────────────────
+	items := s.sourceItems()
+	if s.cursor >= len(items) {
+		s.cursor = len(items) - 1
+	}
 	var src strings.Builder
-	src.WriteString(srcRow("A", "Auto: Google primary, ZyC fallback", s.app.Cfg.ClangSource == config.ClangAuto, innerW) + "\n")
-	src.WriteString(srcRow("G", "Google AOSP clang (android.googlesource.com)", s.app.Cfg.ClangSource == config.ClangGoogle, innerW) + "\n")
-	src.WriteString(srcRow("Z", "ZyC Clang (community / GitHub releases)", s.app.Cfg.ClangSource == config.ClangZyC, innerW))
-	if s.app.Cfg.ClangSource == config.ClangZyC {
-		src.WriteString("\n" + components.Rule("ZyC target", innerW, MutedText) + "\n")
-		src.WriteString(srcRow("2", "ZyC Clang 23.x (current)", s.app.Cfg.ZyCTarget == "23", innerW) + "\n")
-		src.WriteString(srcRow("1", "ZyC Clang 15.x (legacy)", s.app.Cfg.ZyCTarget == "15", innerW) + "\n")
-		src.WriteString(srcRow("L", "Latest (any version)", s.app.Cfg.ZyCTarget == "latest", innerW))
+	for i, it := range items {
+		var selected bool
+		switch it.source {
+		case config.ClangGoogle:
+			selected = s.app.Cfg.ClangSource == config.ClangGoogle
+		case config.ClangZyC:
+			selected = s.app.Cfg.ClangSource == config.ClangZyC && s.app.Cfg.ZyCTarget == it.zycTag
+		}
+		src.WriteString(srcRow(it.hotkey, it.desc, selected, i == s.cursor, inner) + "\n")
 	}
-	srcPanel := components.Panel("Source", src.String(), w, PanelBorder, TitleStyle)
+	srcPanel := components.Panel("Source", strings.TrimRight(src.String(), "\n"),
+		w, PanelBorder, TitleStyle)
 
-	// ── Action strip ────────────────────────────────────────────────────────
-	actions := components.HotkeyStrip([]components.Hotkey{
-		{Key: "F", Desc: "Fetch", Sub: "check + download"},
-		{Key: "C", Desc: "Check latest", Sub: "query upstream"},
-		{Key: "ESC", Desc: "Back"},
-	}, HotKeyStyle, ValueStyle, DimText, MutedText)
-
-	divider := "  " + components.Separator(innerContentWidth(w), MutedText) + "\n"
-	out := banner + "\n" + statePanel + "\n" + srcPanel + "\n" + divider + "  " + actions + "\n"
-
+	// ── Activity log ────────────────────────────────────────────────────────
+	logBody := s.log.Render(8)
 	if s.busy {
-		out += "\n  " + AccentText.Render(s.stage+" …") + "\n  " + s.prog.View() + "\n"
+		logBody += "\n" + AccentText.Render(s.stage+" …")
+		if s.dlBytes > 0 && s.dlTotal > 0 {
+			logBody += "\n  " + s.prog.View()
+		}
 	}
-	if s.app.Toast != "" {
-		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
-	}
-	return out
+	logPanel := components.Panel("Activity", logBody, w, PanelBorder, TitleStyle)
+
+	// ── Actions panel ───────────────────────────────────────────────────────
+	leader := lipgloss.NewStyle().Foreground(ColorMuted)
+	labelSt := lipgloss.NewStyle().Foreground(ColorValue).Bold(true)
+	var act strings.Builder
+	// "  " prefix keeps the [F/C/R] bracket column aligned with the rest
+	// of the script (Source rows, Build Options, Main Menu) so brackets
+	// line up vertically across pages, not just within one panel.
+	mw := inner - 2
+	act.WriteString("  " + components.MenuRow("F", "Fetch",
+		"download + install selected target", mw, 1,
+		HotKeyStyle, labelSt, MutedText, leader) + "\n")
+	act.WriteString("  " + components.MenuRow("C", "Check Latest",
+		"query upstream, no install", mw, 1,
+		HotKeyStyle, labelSt, MutedText, leader) + "\n")
+	act.WriteString("  " + components.MenuRow("D", "Delete Active",
+		"remove active toolchain (others kept)", mw, 1,
+		HotKeyStyle, labelSt, MutedText, leader) + "\n")
+	act.WriteString("  " + components.MenuRow("R", "Return", "to Mode Select", mw, 1,
+		HotKeyStyle, labelSt, MutedText, leader))
+	actPanel := components.Panel("Actions", act.String(), w, PanelBorder, TitleStyle)
+
+	out := strings.Join([]string{
+		banner, statePanel, srcPanel, actPanel, logPanel,
+		"  " + HelpStyle.Render("Select [G/2/1/L/F/C/D/R]\u00a0\u00b7\u00a0esc to return"),
+	}, "\n")
+	return strings.TrimRight(out, "\n ")
 }
 
-// srcRow renders one source-selector row with [key] right-padded so all
-// closing brackets align in a column even when keys are mixed letters/digits.
-func srcRow(key, label string, selected bool, width int) string {
-	mark := "  "
+// srcRow renders one source-selector row. selected = persisted active source;
+// hovered = cursor position. They render distinctly: selected gets the
+// `●` dot, hovered gets the `›` chevron, and a row that is both shows
+// both markers (`›●`) so the navigation arrow stays visible even when
+// it's sitting on the active source. The label is dot-padded out to the
+// panel's inner width so an ACTIVE pill sits flush against the right
+// edge — matching the dot-leader pattern used by the main menu and
+// Build Options rows.
+func srcRow(key, label string, selected, hovered bool, width int) string {
+	// Two-char marker column so the [X] bracket sits at content
+	// column 2 across every page. Slot 0 holds the selection dot
+	// `●`, slot 1 holds the cursor chevron `›` (immediately left of
+	// the bracket, matching the main menu pattern). When the cursor
+	// is sitting on the active source, both are shown.
+	a, b := " ", " "
 	if selected {
-		mark = SelText.Render(" ●")
+		a = SelText.Render("●")
 	}
+	if hovered {
+		b = AccentText.Render("›")
+	}
+	mark := a + b
 	tag := components.BracketTag(key, 1, HotKeyStyle)
-	row := mark + " " + tag + "  " +
+	prefix := mark + tag + "  " +
 		lipgloss.NewStyle().Foreground(ColorValue).Render(label)
+	rhs := ""
 	if selected {
-		row += "  " + components.Badge("ACTIVE", BadgeAccent)
+		rhs = components.Badge("ACTIVE", BadgeAccent)
 	}
-	return row
+	if rhs == "" {
+		return prefix
+	}
+	pad := width - lipgloss.Width(prefix) - lipgloss.Width(rhs)
+	if pad < 3 {
+		return prefix + "  " + rhs
+	}
+	return prefix + components.DotLeader(pad, MutedText) + rhs
 }
 
 func sourceLabel(c config.Config) string {
@@ -221,8 +390,25 @@ func sizeStr(b int64) string {
 	if b <= 0 {
 		return "?"
 	}
-	const mb = 1024 * 1024
-	return fmt.Sprintf("%d MB", (b+mb-1)/mb)
+	return humanBytes(b)
+}
+
+// humanBytes formats a byte count as a short MiB / GiB string.
+func humanBytes(b int64) string {
+	const (
+		kb = 1024
+		mb = 1024 * 1024
+		gb = 1024 * 1024 * 1024
+	)
+	switch {
+	case b >= gb:
+		return fmt.Sprintf("%.1f GiB", float64(b)/float64(gb))
+	case b >= mb:
+		return fmt.Sprintf("%.1f MiB", float64(b)/float64(mb))
+	case b >= kb:
+		return fmt.Sprintf("%.1f KiB", float64(b)/float64(kb))
+	}
+	return fmt.Sprintf("%d B", b)
 }
 
 func (s ToolchainScreen) queryCmd() tea.Cmd {
@@ -282,7 +468,7 @@ func (s ToolchainScreen) queryThenFetchCmd() tea.Cmd {
 			if Program == nil {
 				return
 			}
-			if time.Since(lastSent) < 100*time.Millisecond && done < total {
+			if time.Since(lastSent) < 100*time.Millisecond && (total <= 0 || done < total) {
 				return
 			}
 			lastSent = time.Now()

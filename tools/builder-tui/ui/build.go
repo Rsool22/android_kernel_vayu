@@ -418,30 +418,43 @@ func (s BuildScreen) View() string {
 	}
 	stagesPanel := components.Panel("Pipeline", stages.String(), w, PanelBorder, TitleStyle)
 
-	// Compile output viewport (header rule + framed).
-	headLabel := lipgloss.NewStyle().Foreground(ColorBuild).Bold(true).Render(" Compiler output ")
-	headFillW := w - lipgloss.Width(headLabel)
-	if headFillW < 0 {
-		headFillW = 0
+	// Compile output viewport — only rendered once the build is actually
+	// running (or has produced output / a result). Skipping it on the
+	// idle "press [B] to start" screen avoids the empty 14-row rounded
+	// box that otherwise dominates the layout and makes the box look
+	// like it's "starting on a new line".
+	var vpBlock string
+	if s.running || len(s.lines) > 0 || s.result != nil {
+		headLabel := lipgloss.NewStyle().Foreground(ColorBuild).Bold(true).Render(" Compiler output ")
+		headFillW := w - lipgloss.Width(headLabel)
+		if headFillW < 0 {
+			headFillW = 0
+		}
+		vpHeader := headLabel + MutedText.Render(strings.Repeat("─", headFillW))
+		vpBlock = vpHeader + "\n" + s.vp.View()
 	}
-	vpHeader := headLabel + MutedText.Render(strings.Repeat("─", headFillW)) + "\n"
 
 	// Result panel (after pipeline finishes).
 	var resultPanel string
 	if s.result != nil {
-		resultPanel = "\n" + s.renderResultPanel(w, inner) + "\n"
+		resultPanel = s.renderResultPanel(w, inner)
 	}
 
-	// Action strip.
-	actions := s.renderActions()
-
-	out := banner + "\n" + stagesPanel + "\n" + vpHeader + s.vp.View() + resultPanel + "\n" +
-		"  " + components.Separator(inner, MutedText) + "\n" +
-		"  " + actions + "\n"
+	// Stitch the screen together with exactly one separating newline
+	// between blocks. Joining + TrimRight keeps trailing whitespace
+	// from accumulating at the bottom of the screen on tall terminals.
+	parts := []string{banner, stagesPanel}
+	if vpBlock != "" {
+		parts = append(parts, vpBlock)
+	}
+	if resultPanel != "" {
+		parts = append(parts, resultPanel)
+	}
+	parts = append(parts, "  "+HelpStyle.Render(s.helpLine()))
 	if s.app.Toast != "" {
-		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
+		parts = append(parts, "  "+components.Toast(s.app.Toast, s.app.ToastErr))
 	}
-	return out
+	return strings.TrimRight(strings.Join(parts, "\n"), "\n ")
 }
 
 // stageRow renders one pipeline stage line: `[#] Name      RUNNING  detail`.
@@ -464,17 +477,15 @@ func stageRow(sv stageView, spinFrame string, width int) string {
 		badge = MutedText.Render("…")
 	}
 	tag := components.BracketTag(num, 1, HotKeyStyle)
-	prefix := tag + "  " + ValueStyle.Render(padTo(name, 10))
+	// 2-col leading indent so the [#] bracket column lines up with menu
+	// rows on every other screen.
+	prefix := "  " + tag + "  " + ValueStyle.Render(padTo(name, 10))
 	rhs := badge
 	if sv.Detail != "" {
 		rhs += "  " + DimText.Render(sv.Detail)
 	}
-	pad := width - lipgloss.Width(prefix) - lipgloss.Width(rhs) - 2
-	if pad < 1 {
-		pad = 1
-	}
-	leader := MutedText.Render(" " + strings.Repeat("·", pad-2) + " ")
-	return prefix + leader + rhs
+	pad := width - lipgloss.Width(prefix) - lipgloss.Width(rhs)
+	return prefix + components.DotLeader(pad, MutedText) + rhs
 }
 
 // renderResultPanel renders ASCII art + summary panel after the pipeline
@@ -527,8 +538,12 @@ func (s BuildScreen) renderSuccessSummary(inner int) string {
 	}
 	var b strings.Builder
 	const lblW = 14
+	valW := inner - lblW - 3 // " : "
+	if valW < 8 {
+		valW = 8
+	}
 	add := func(k, v string) {
-		b.WriteString(components.KV(k, v, lblW, LabelStyle, ValueStyle))
+		b.WriteString(components.KVWrap(k, v, lblW, valW, LabelStyle, ValueStyle))
 		b.WriteString("\n")
 	}
 	add("Build", fmt.Sprintf("#%d", num))
@@ -581,7 +596,11 @@ func (s BuildScreen) renderFailSummary(inner int) string {
 		b.WriteString(DimText.Render("  (no error: lines found — check the log)") + "\n")
 	}
 	b.WriteString(components.Separator(inner, MutedText) + "\n")
-	b.WriteString(components.KV("Log", filepath.Base(r.FailLog), 14, LabelStyle, DimText) + "\n")
+	wrapW := inner - 14 - 3
+	if wrapW < 8 {
+		wrapW = 8
+	}
+	b.WriteString(components.KVWrap("Log", filepath.Base(r.FailLog), 14, wrapW, LabelStyle, DimText) + "\n")
 	return b.String()
 }
 
@@ -591,40 +610,30 @@ func (s BuildScreen) renderCancelSummary(inner int) string {
 	b.WriteString(lipgloss.PlaceHorizontal(inner, lipgloss.Center,
 		WarnText.Render("Build cancelled by user")) + "\n")
 	b.WriteString(components.Separator(inner, MutedText) + "\n")
-	b.WriteString(components.KV("Elapsed", pipeline.FormatElapsed(int(r.Elapsed.Seconds())), 14, LabelStyle, DimText) + "\n")
+	wrapW := inner - 14 - 3
+	if wrapW < 8 {
+		wrapW = 8
+	}
+	b.WriteString(components.KVWrap("Elapsed", pipeline.FormatElapsed(int(r.Elapsed.Seconds())), 14, wrapW, LabelStyle, DimText) + "\n")
 	b.WriteString("  " + DimText.Render("Objects in out/ are intact for incremental retry") + "\n")
 	return b.String()
 }
 
-func (s BuildScreen) renderActions() string {
+// helpLine returns a single-line description of the keys available in the
+// build screen depending on its current state (running / post-build / idle).
+func (s BuildScreen) helpLine() string {
 	if s.running {
-		return components.HotkeyStrip([]components.Hotkey{
-			{Key: "Ctrl+C", Desc: "Cancel"},
-			{Key: "↑/↓", Desc: "Scroll"},
-			{Key: "ESC", Desc: "Main"},
-		}, HotKeyStyle, ValueStyle, DimText, MutedText)
+		return "Ctrl+C cancels · ↑/↓ scroll · esc to return"
 	}
 	if s.postBuild {
-		items := []components.Hotkey{
-			{Key: "T", Desc: "Retry full clean"},
-			{Key: "I", Desc: "Retry incremental"},
-		}
+		opts := []string{"T", "I"}
 		if s.app.MenuconfigUsed {
-			items = append(items,
-				components.Hotkey{Key: "V", Desc: "Preserve menuconfig"},
-				components.Hotkey{Key: "D", Desc: "Write defconfig"},
-			)
+			opts = append(opts, "V", "D")
 		}
-		items = append(items,
-			components.Hotkey{Key: "R", Desc: "Return to main"},
-			components.Hotkey{Key: "E", Desc: "Exit"},
-		)
-		return components.HotkeyStrip(items, HotKeyStyle, ValueStyle, DimText, MutedText)
+		opts = append(opts, "R", "E")
+		return "Select [" + strings.Join(opts, "/") + "] · esc to return"
 	}
-	return components.HotkeyStrip([]components.Hotkey{
-		{Key: "B", Desc: "Build", Sub: "configure → compile → package"},
-		{Key: "ESC", Desc: "Back"},
-	}, HotKeyStyle, ValueStyle, DimText, MutedText)
+	return "Press [B] to build · esc to return"
 }
 
 // truncate returns s clipped to maxRunes with an ellipsis when needed.

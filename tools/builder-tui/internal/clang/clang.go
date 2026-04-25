@@ -305,13 +305,33 @@ func (z *ZyC) Latest(ctx context.Context, target string) (Release, error) {
 // (total <= 0 if unknown).
 type ProgressFunc func(downloaded, total int64)
 
-// Install downloads rel into a temp file, then extracts into installDir,
-// replacing any existing contents. It verifies that bin/clang is executable
-// after extraction.
+// Install downloads rel and extracts it into a *versioned* sub-folder
+// alongside installDir, then atomically swings installDir to point at it
+// via symlink. Skipping the download when the version is already on disk
+// lets users switch between stored toolchains without waiting on a re-fetch.
+//
+// Layout (assuming installDir = "/home/me/clang"):
+//
+//	/home/me/clang-store/zyc-23.0.0/bin/clang   ← actual contents
+//	/home/me/clang-store/google-r498229/bin/clang
+//	/home/me/clang             → symlink to clang-store/<active>
+//
+// The previous behaviour (RemoveAll(installDir) + extract in place) is
+// preserved as a fallback when symlinks are unavailable on the target FS.
 func Install(ctx context.Context, rel Release, installDir string, progress ProgressFunc) error {
 	if installDir == "" {
 		return errors.New("install dir is empty")
 	}
+	store := storeDir(installDir)
+	slot := versionSlot(store, rel)
+	if hasClang(slot) {
+		// Already on disk — just swing the active symlink and skip the fetch.
+		if progress != nil {
+			progress(0, 0)
+		}
+		return Activate(installDir, slot)
+	}
+
 	tmpFile, err := os.CreateTemp("", "vayu-clang-*"+filepath.Ext(rel.AssetName))
 	if err != nil {
 		return err
@@ -326,17 +346,149 @@ func Install(ctx context.Context, rel Release, installDir string, progress Progr
 		return err
 	}
 
-	if err := os.RemoveAll(installDir); err != nil {
-		return fmt.Errorf("clear %s: %w", installDir, err)
-	}
-	if err := os.MkdirAll(installDir, 0o755); err != nil {
+	if err := os.MkdirAll(slot, 0o755); err != nil {
 		return err
 	}
-	if err := extract(tmpFile.Name(), installDir); err != nil {
+	if err := extract(tmpFile.Name(), slot); err != nil {
+		_ = os.RemoveAll(slot)
 		return fmt.Errorf("extract: %w", err)
 	}
-	if !hasClang(installDir) {
+	if !hasClang(slot) {
+		_ = os.RemoveAll(slot)
 		return errors.New("extracted archive does not contain bin/clang")
+	}
+	return Activate(installDir, slot)
+}
+
+// storeDir returns the per-installDir versioned-store path. We keep the
+// versions next to the active dir (not inside it) so deleting the active
+// link doesn't accidentally wipe stored toolchains.
+func storeDir(installDir string) string {
+	return filepath.Clean(installDir) + "-store"
+}
+
+// versionSlot returns the per-version directory inside the store for rel.
+// The slot name is `{source}-{tag}` so multiple ZyC releases coexist
+// without colliding (e.g. zyc-23.0.0, zyc-15.0.7, zyc-latest, google-r498229).
+func versionSlot(store string, rel Release) string {
+	tag := rel.Tag
+	if tag == "" {
+		tag = "unknown"
+	}
+	src := rel.Source
+	if src == "" {
+		src = "auto"
+	}
+	return filepath.Join(store, src+"-"+sanitizeSlot(tag))
+}
+
+func sanitizeSlot(s string) string {
+	// Slashes / spaces would create unwanted nested dirs.
+	r := strings.NewReplacer("/", "_", " ", "_", "..", "_")
+	return r.Replace(s)
+}
+
+// Activate points installDir at slot via symlink. When symlinks are not
+// supported (rare; e.g. some weird container FS), it falls back to a copy
+// + RemoveAll dance.
+func Activate(installDir, slot string) error {
+	if installDir == "" || slot == "" {
+		return errors.New("install dir or slot is empty")
+	}
+	if !hasClang(slot) {
+		return fmt.Errorf("slot %s has no bin/clang", slot)
+	}
+	// Remove whatever is at installDir (file, dir, or stale symlink).
+	if _, err := os.Lstat(installDir); err == nil {
+		if err := os.RemoveAll(installDir); err != nil {
+			return fmt.Errorf("clear %s: %w", installDir, err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(installDir), 0o755); err != nil {
+		return err
+	}
+	if err := os.Symlink(slot, installDir); err != nil {
+		// Fallback: hard copy. Slow but works on FSes without symlinks.
+		if cpErr := copyTree(slot, installDir); cpErr != nil {
+			return fmt.Errorf("symlink failed (%v) and copy fallback failed: %w", err, cpErr)
+		}
+	}
+	return nil
+}
+
+// copyTree mirrors src into dst using `cp -a`, falling back to a manual
+// walk if cp is unavailable. Used only as the no-symlink fallback.
+func copyTree(src, dst string) error {
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	cmd := exec.Command("cp", "-a", src+"/.", dst)
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// InstalledVersion describes one toolchain stored on disk.
+type InstalledVersion struct {
+	Source string // "zyc" / "google" / "auto"
+	Tag    string // e.g. "23.0.0" or "r498229"
+	Path   string // absolute path to the slot
+	Active bool   // whether installDir currently points at this slot
+}
+
+// ListInstalled enumerates toolchains in installDir's store. The returned
+// slice is sorted by Source then Tag so the UI ordering is stable.
+func ListInstalled(installDir string) []InstalledVersion {
+	store := storeDir(installDir)
+	entries, err := os.ReadDir(store)
+	if err != nil {
+		return nil
+	}
+	active := ""
+	if t, err := os.Readlink(installDir); err == nil {
+		active = filepath.Clean(t)
+	}
+	var out []InstalledVersion
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		full := filepath.Join(store, e.Name())
+		if !hasClang(full) {
+			continue
+		}
+		src, tag := splitSlotName(e.Name())
+		out = append(out, InstalledVersion{
+			Source: src,
+			Tag:    tag,
+			Path:   full,
+			Active: filepath.Clean(full) == active,
+		})
+	}
+	return out
+}
+
+func splitSlotName(name string) (src, tag string) {
+	idx := strings.IndexByte(name, '-')
+	if idx <= 0 {
+		return "", name
+	}
+	return name[:idx], name[idx+1:]
+}
+
+// RemoveInstalled deletes one stored toolchain version. If the active
+// symlink points at the version being deleted, the symlink is also
+// removed so subsequent builds fail loudly instead of silently using
+// the wrong (stale) version.
+func RemoveInstalled(installDir string, v InstalledVersion) error {
+	if v.Path == "" {
+		return errors.New("install version has no path")
+	}
+	if err := os.RemoveAll(v.Path); err != nil {
+		return err
+	}
+	if v.Active {
+		_ = os.RemoveAll(installDir)
 	}
 	return nil
 }
@@ -360,9 +512,22 @@ func downloadTo(ctx context.Context, url string, w io.Writer, progress ProgressF
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("http %d for %s", resp.StatusCode, url)
 	}
+	// Gitiles serves the +archive tarball with chunked transfer and no
+	// Content-Length (we get -1). Fall back to "indeterminate" mode and
+	// surface the bytes downloaded so the caller can render a meaningful
+	// status line instead of a stuck-at-0% progress bar.
 	total := resp.ContentLength
 	pr := &progressReader{r: resp.Body, total: total, cb: progress}
+	if progress != nil {
+		// Emit an immediate 0/total tick so the UI can switch into download
+		// mode the moment headers come back, not 100ms later.
+		progress(0, total)
+	}
 	_, err = io.Copy(w, pr)
+	if err == nil && progress != nil {
+		// Final tick so the UI shows 100% / final byte count.
+		progress(pr.read, pr.read)
+	}
 	return err
 }
 

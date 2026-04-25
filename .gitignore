@@ -155,3 +155,7 @@ out/
 # vayu-builder: don't ignore .github (kernel default ignores dot-prefixed paths)
 !.github
 !.github/**
+
+# build.sh's local Go binary cache — built on first run, never committed.
+/bin/
+/bin/vayu-builder

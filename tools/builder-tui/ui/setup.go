@@ -3,7 +3,6 @@ package ui
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -11,135 +10,60 @@ import (
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/ui/components"
 )
 
-// pathField identifies which of the 6 path slots is being edited.
-type pathField int
-
-const (
-	fieldKernel pathField = iota + 1
-	fieldClang
-	fieldAnyKernel
-	fieldOutput
-	fieldGcc64
-	fieldGcc32
-)
-
-// SetupScreen renders the resolved paths panel + distro install hints
-// and exposes inline path editing via bubbles textinput.
+// SetupScreen is the wrapper menu for second-tier setup actions: path
+// editor (PathsScreen), dependency probe (DepsScreen), and the theme
+// picker for visual customisation.
+//
+// Hotkeys: P / D / C / R (return). ESC also returns to main. [C] cycles
+// through the bundled palettes (bash → modern → ocean → forest → mono),
+// applies the new style live, and persists the choice to Cfg.Theme.
 type SetupScreen struct {
-	app   *App
-	editing pathField
-	input textinput.Model
+	app    *App
+	cursor int // 0..3 — P, D, C, R rows
 }
 
-func NewSetupScreen(a *App) SetupScreen {
-	ti := textinput.New()
-	ti.Placeholder = ""
-	ti.CharLimit = 4096
-	ti.Width = 60
-	ti.Prompt = "▶ "
-	ti.PromptStyle = lipgloss.NewStyle().Foreground(ColorAccent)
-	ti.TextStyle = lipgloss.NewStyle().Foreground(ColorValue)
-	return SetupScreen{app: a, input: ti}
-}
+func NewSetupScreen(a *App) SetupScreen { return SetupScreen{app: a} }
 
 func (s SetupScreen) Init() tea.Cmd { return nil }
 
-// fieldValue returns the current persisted value for a given field.
-func (s SetupScreen) fieldValue(f pathField) string {
-	switch f {
-	case fieldKernel:
-		return s.app.Cfg.KernelDir
-	case fieldClang:
-		return s.app.Cfg.ClangDir
-	case fieldAnyKernel:
-		return s.app.Cfg.AnyKernelDir
-	case fieldOutput:
-		return s.app.Cfg.OutputDir
-	case fieldGcc64:
-		return s.app.Cfg.GCC64Dir
-	case fieldGcc32:
-		return s.app.Cfg.GCC32Dir
-	}
-	return ""
-}
-
-func (s *SetupScreen) setFieldValue(f pathField, v string) {
-	v = strings.TrimSpace(v)
-	switch f {
-	case fieldKernel:
-		s.app.Cfg.KernelDir = v
-	case fieldClang:
-		s.app.Cfg.ClangDir = v
-	case fieldAnyKernel:
-		s.app.Cfg.AnyKernelDir = v
-	case fieldOutput:
-		s.app.Cfg.OutputDir = v
-	case fieldGcc64:
-		s.app.Cfg.GCC64Dir = v
-	case fieldGcc32:
-		s.app.Cfg.GCC32Dir = v
-	}
-}
-
-// fieldLabel returns the human-readable name for the row.
-func fieldLabel(f pathField) string {
-	switch f {
-	case fieldKernel:
-		return "Kernel directory"
-	case fieldClang:
-		return "Clang directory"
-	case fieldAnyKernel:
-		return "AnyKernel3 directory"
-	case fieldOutput:
-		return "Output directory"
-	case fieldGcc64:
-		return "aarch64 GCC directory"
-	case fieldGcc32:
-		return "arm GCC directory"
-	}
-	return ""
-}
-
 func (s SetupScreen) Update(msg tea.Msg) (SetupScreen, tea.Cmd) {
-	if s.editing != 0 {
-		switch m := msg.(type) {
-		case tea.KeyMsg:
-			switch m.String() {
-			case "enter":
-				s.setFieldValue(s.editing, s.input.Value())
-				s.app.PersistConfig()
-				p, _ := discover.Resolve(".",
-					s.app.Cfg.KernelDir, s.app.Cfg.ClangDir, s.app.Cfg.AnyKernelDir, s.app.Cfg.OutputDir)
-				s.app.Paths = p
-				s.app.Toast = fieldLabel(s.editing) + " saved."
-				s.app.ToastErr = false
-				s.editing = 0
-				return s, nil
-			case "esc":
-				s.editing = 0
-				s.app.Toast = "Edit cancelled."
-				return s, nil
-			}
-		}
-		var cmd tea.Cmd
-		s.input, cmd = s.input.Update(msg)
-		return s, cmd
-	}
 	switch m := msg.(type) {
 	case tea.KeyMsg:
-		switch strings.ToLower(m.String()) {
-		case "r":
-			p, _ := discover.Resolve(".",
-				s.app.Cfg.KernelDir, s.app.Cfg.ClangDir, s.app.Cfg.AnyKernelDir, s.app.Cfg.OutputDir)
-			s.app.Paths = p
-			s.app.Toast = "Paths re-scanned."
+		key := strings.ToLower(m.String())
+		switch key {
+		case "up":
+			if s.cursor > 0 {
+				s.cursor--
+			}
+			return s, nil
+		case "down":
+			if s.cursor < 3 {
+				s.cursor++
+			}
+			return s, nil
+		case "enter":
+			key = []string{"p", "d", "c", "r"}[s.cursor]
+		}
+		switch key {
+		case "p":
+			s.app.Screen = ScreenPaths
+			return s, s.app.paths.Init()
+		case "d":
+			s.app.Screen = ScreenDeps
+			return s, s.app.deps.Init()
+		case "c":
+			// Cycle to next theme, apply live, persist.
+			cur := ParseStyle(s.app.Cfg.Theme)
+			next := (int(cur) + 1) % len(StyleNames)
+			s.app.Cfg.Theme = StyleNames[next]
+			ApplyStyle(StyleVariant(next))
+			s.app.PersistConfig()
+			s.app.Toast = "theme → " + s.app.Cfg.Theme
 			s.app.ToastErr = false
-		case "1", "2", "3", "4", "5", "6":
-			f := pathField(m.String()[0] - '0')
-			s.editing = f
-			s.input.SetValue(s.fieldValue(f))
-			s.input.Focus()
-			return s, textinput.Blink
+			return s, nil
+		case "r", "esc":
+			s.app.Screen = ScreenMain
+			return s, nil
 		}
 	}
 	return s, nil
@@ -147,85 +71,73 @@ func (s SetupScreen) Update(msg tea.Msg) (SetupScreen, tea.Cmd) {
 
 func (s SetupScreen) View() string {
 	w := panelWidth(s.app.Width)
+	innerW := innerContentWidth(w)
 
 	banner := components.Banner(
-		"SETUP  ·  PATHS",
-		"autodiscovered, persisted in ~/.config/vayu_builder",
+		"SETUP",
+		"paths · dependencies",
 		w, BannerBorder, BannerTitle, BannerSubtle,
 	)
 
-	// ── Paths panel ─────────────────────────────────────────────────────────
-	type row struct {
-		key, label, value string
-		bad               bool
+	type menuItem struct {
+		key, label, rhs string
 	}
-	rows := []row{
-		{"1", "Kernel       ", okOr(s.app.Paths.Kernel, "(not found)"), s.app.Paths.Kernel == ""},
-		{"2", "Clang        ", okOr(s.app.Paths.Clang, "(not found)"), s.app.Paths.Clang == ""},
-		{"3", "AnyKernel3   ", okOr(s.app.Paths.AnyKernel, "(not found)"), s.app.Paths.AnyKernel == ""},
-		{"4", "Output       ", okOr(s.app.Paths.Output, "(unset)"), s.app.Paths.Output == ""},
-		{"5", "aarch64-gcc  ", okOr(s.app.Paths.GccArm64, "(not found)"), s.app.Paths.GccArm64 == ""},
-		{"6", "arm-gcc      ", okOr(s.app.Paths.GccArm, "(not found)"), s.app.Paths.GccArm == ""},
+	items := []menuItem{
+		{"P", "Configure Paths", "kernel/clang/output dirs"},
+		{"D", "Check Dependencies", "verify + install packages"},
+		{"C", "Customize Theme", "current → " + okOr(s.app.Cfg.Theme, "bash")},
+		{"R", "Return to Main Menu", ""},
 	}
-	var p strings.Builder
-	for i, r := range rows {
-		v := ValueStyle
-		if r.bad {
-			v = ErrText
+
+	var menu strings.Builder
+	leader := lipgloss.NewStyle().Foreground(ColorMuted)
+	maxKey := 1
+	for i, it := range items {
+		labelStyle := lipgloss.NewStyle().Foreground(ColorValue).Bold(true)
+		rhsStyle := lipgloss.NewStyle().Foreground(ColorAccent)
+		if it.rhs == "" {
+			rhsStyle = lipgloss.NewStyle().Foreground(ColorMuted)
 		}
-		tag := components.BracketTag(r.key, 1, HotKeyStyle)
-		p.WriteString("  " + tag + "  " + LabelStyle.Render(r.label) + "  " + v.Render(r.value))
-		if i < len(rows)-1 {
-			p.WriteString("\n")
+		mark := "  "
+		if i == s.cursor {
+			mark = AccentText.Render(" ›")
+		}
+		row := components.MenuRow(it.key, it.label, it.rhs, innerW-2, maxKey,
+			HotKeyStyle, labelStyle, rhsStyle, leader,
+		)
+		menu.WriteString(mark + row)
+		if i < len(items)-1 {
+			menu.WriteString("\n")
 		}
 	}
-	pathsPanel := components.Panel("Resolved paths", p.String(), w, PanelBorder, TitleStyle)
+	menuPanel := components.Panel("Setup", menu.String(), w, PanelBorder, TitleStyle)
 
-	// ── Editor panel ────────────────────────────────────────────────────────
-	var editorPanel string
-	if s.editing != 0 {
-		var b strings.Builder
-		b.WriteString(LabelStyle.Render("Editing: ") + ValueStyle.Render(fieldLabel(s.editing)) + "\n")
-		b.WriteString(s.input.View())
-		editorPanel = components.Panel("Edit path", b.String(), w, PanelWarn, lipgloss.NewStyle().Foreground(ColorWarn).Bold(true)) + "\n"
-	}
-
-	// ── Install hints panel (distro-aware) ──────────────────────────────────
-	var hintsPanel string
-	if s.app.Paths.Distro != discover.PMUnknown {
-		var h strings.Builder
-		hints := installHints(s.app.Paths)
-		for i, line := range hints {
-			h.WriteString("  " + AccentText.Render("$ ") + ValueStyle.Render(line))
-			if i < len(hints)-1 {
-				h.WriteString("\n")
-			}
+	// Path warnings — same surface as bash _draw_setup_menu.
+	var extras strings.Builder
+	if s.app.Paths.Clang == "" || s.app.Paths.AnyKernel == "" {
+		var msgs []string
+		if s.app.Paths.Clang == "" {
+			msgs = append(msgs, "[!] Clang not found: "+defaultOr(s.app.Cfg.ClangDir, "(unset)"))
 		}
-		hintsPanel = components.Panel("Install hints ("+string(s.app.Paths.Distro)+")", h.String(), w, PanelBorder, TitleStyle) + "\n"
+		if s.app.Paths.AnyKernel == "" {
+			msgs = append(msgs, "[!] AnyKernel3 not found: "+defaultOr(s.app.Cfg.AnyKernelDir, "(unset)"))
+		}
+		msgs = append(msgs, "Use [P] to fix paths or [T] in main menu to download Clang.")
+		body := ErrText.Render(strings.Join(msgs, "\n"))
+		extras.WriteString(components.Panel("Path Issues", body, w, PanelErr, ErrText))
+		extras.WriteString("\n")
 	}
 
-	var actions string
-	if s.editing != 0 {
-		actions = components.HotkeyStrip([]components.Hotkey{
-			{Key: "Enter", Desc: "Save"},
-			{Key: "ESC", Desc: "Cancel"},
-		}, HotKeyStyle, ValueStyle, DimText, MutedText)
-	} else {
-		actions = components.HotkeyStrip([]components.Hotkey{
-			{Key: "1-6", Desc: "Edit", Sub: "path slot"},
-			{Key: "R", Desc: "Re-scan"},
-			{Key: "ESC", Desc: "Back"},
-		}, HotKeyStyle, ValueStyle, DimText, MutedText)
-	}
-
-	divider := "  " + components.Separator(innerContentWidth(w), MutedText) + "\n"
-	out := banner + "\n" + pathsPanel + "\n" + editorPanel + hintsPanel + divider + "  " + actions + "\n"
+	help := HelpStyle.Render("  Select [P/D/C/R] · esc to return")
+	var toast string
 	if s.app.Toast != "" {
-		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
+		toast = "  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}
-	return out
+	return banner + "\n" + menuPanel + "\n" + extras.String() + toast + help
 }
 
+// installHints returns the distro-specific install command(s) for missing
+// host build packages. Used by DepsScreen and PathsScreen.
 func installHints(p discover.Paths) []string {
 	pkgs := []string{"git", "ccache", "make", "bc", "bison", "flex", "zip", "unzip", "rsync", "python3", "build-essential"}
 	if p.GccArm64 == "" {
@@ -247,4 +159,59 @@ func installHints(p discover.Paths) []string {
 		return []string{"sudo apk add " + strings.Join(pkgs, " ")}
 	}
 	return []string{"(distro unknown -- install: " + strings.Join(pkgs, ", ") + ")"}
+}
+
+// wrapValue is a thin wrapper over wrapPlainPaths that keeps long path
+// values on a single line until they exceed `width`, then breaks on path
+// separators preferentially.
+func wrapValue(s string, width int) []string {
+	if width <= 0 || len(s) <= width {
+		return []string{s}
+	}
+	return wrapPlainPaths(s, width)
+}
+
+// wrapPlainPaths breaks s at /, space, or hyphen boundaries near the width
+// limit; falls back to a hard cut.
+func wrapPlainPaths(s string, width int) []string {
+	var lines []string
+	for len(s) > width {
+		cut := width
+		for i := width; i > width/2 && i < len(s); i-- {
+			c := s[i]
+			if c == '/' || c == ' ' || c == '-' || c == '_' {
+				cut = i + 1
+				break
+			}
+		}
+		if cut > len(s) {
+			cut = len(s)
+		}
+		lines = append(lines, s[:cut])
+		s = s[cut:]
+	}
+	if s != "" {
+		lines = append(lines, s)
+	}
+	return lines
+}
+
+// padRight right-pads s to the given visual width with spaces. Safe
+// when s is already wider than width (returns s unchanged) and never
+// panics on a negative repeat count.
+func padRight(s string, width int) string {
+	if lipgloss.Width(s) >= width {
+		return s
+	}
+	return s + components.SafeRepeat(" ", width-lipgloss.Width(s))
+}
+
+// defaultOr returns d when d is non-empty, otherwise alt. Used to surface
+// the *configured default* when discovery fails so the user sees what the
+// builder is going to try, instead of "(not found)" alone.
+func defaultOr(d, alt string) string {
+	if d == "" {
+		return alt
+	}
+	return d
 }

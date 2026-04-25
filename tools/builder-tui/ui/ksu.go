@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/features"
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/pipeline"
@@ -18,6 +19,10 @@ import (
 
 // KSUScreen surfaces ReSukiSU branch availability and install/update actions.
 // Branch probes run on entry and on demand (key 'p').
+//
+// All operation feedback (probe, install, verify, remove) goes into the live
+// activity log panel rendered above the action strip — no more transient
+// one-line toasts that overwrite each other or get re-printed.
 type KSUScreen struct {
 	app    *App
 	main   resukisu.Probe
@@ -25,9 +30,12 @@ type KSUScreen struct {
 	probed bool
 	busy   bool
 	stage  string
+	log    *components.Activity
 }
 
-func NewKSUScreen(a *App) KSUScreen { return KSUScreen{app: a} }
+func NewKSUScreen(a *App) KSUScreen {
+	return KSUScreen{app: a, log: components.NewActivity()}
+}
 
 func (s KSUScreen) Init() tea.Cmd { return s.probeCmd() }
 
@@ -64,18 +72,15 @@ func (s KSUScreen) Update(msg tea.Msg) (KSUScreen, tea.Cmd) {
 		s.dev = m.dev
 		s.probed = true
 		s.busy = false
-		s.app.Toast = "Upstream probed."
-		s.app.ToastErr = false
+		s.log.OK("upstream probed: main=" + string(m.main.State) + " dev=" + string(m.dev.State))
 		return s, nil
 	case ksuActionDoneMsg:
 		s.busy = false
 		s.stage = ""
 		if m.err != nil {
-			s.app.Toast = m.stage + " failed: " + m.err.Error()
-			s.app.ToastErr = true
+			s.log.Err(m.stage + " failed: " + m.err.Error())
 		} else {
-			s.app.Toast = m.stage + " complete."
-			s.app.ToastErr = false
+			s.log.OK(m.stage + " complete")
 		}
 		return s, nil
 	case tea.KeyMsg:
@@ -86,6 +91,7 @@ func (s KSUScreen) Update(msg tea.Msg) (KSUScreen, tea.Cmd) {
 		case "p":
 			s.busy = true
 			s.stage = "probing upstream"
+			s.log.Info("probing ReSukiSU branches …")
 			return s, s.probeCmd()
 		case "s":
 			if s.app.Cfg.KSUBranch == "main" {
@@ -94,46 +100,49 @@ func (s KSUScreen) Update(msg tea.Msg) (KSUScreen, tea.Cmd) {
 				s.app.Cfg.KSUBranch = "main"
 			}
 			s.app.PersistConfig()
+			s.log.OK("active branch → " + s.app.Cfg.KSUBranch)
 		case "i", "u":
 			selected := s.app.Cfg.KSUBranch
 			brstate := s.branchState(selected)
 			if brstate != resukisu.StatePresent {
-				s.app.Toast = "Cannot install: " + selected + " branch is " + string(brstate)
-				s.app.ToastErr = true
+				s.log.Err("cannot install: " + selected + " branch is " + string(brstate))
 				return s, nil
 			}
 			s.busy = true
 			s.stage = "installing " + selected
+			s.log.Info("installing ReSukiSU [" + selected + "] …")
 			return s, s.installCmd(selected)
 		case "v":
 			s.busy = true
 			s.stage = "verifying KSU hook guards"
+			s.log.Info("running apply_ksu_guards.py …")
 			return s, s.guardCmd()
 		case "x":
 			s.busy = true
 			s.stage = "removing driver (setup.sh --cleanup)"
+			s.log.Warn("removing driver via setup.sh --cleanup …")
 			return s, s.removeCmd()
 		}
 	case ksuGuardDoneMsg:
 		s.busy = false
 		s.stage = ""
 		if m.err != nil {
-			s.app.Toast = "Guards: " + m.err.Error()
-			s.app.ToastErr = true
+			s.log.Err("guards: " + m.err.Error())
 		} else if m.report.Summary != "" {
-			s.app.Toast = "Guards: " + m.report.Summary
-			s.app.ToastErr = m.report.HasFixes()
+			if m.report.HasFixes() {
+				s.log.Warn("guards: " + m.report.Summary)
+			} else {
+				s.log.OK("guards: " + m.report.Summary)
+			}
 		} else {
-			s.app.Toast = "Guards verified"
-			s.app.ToastErr = false
+			s.log.OK("guards verified")
 		}
 		return s, nil
 	case ksuRemoveDoneMsg:
 		s.busy = false
 		s.stage = ""
 		if m.err != nil {
-			s.app.Toast = "Remove failed: " + m.err.Error()
-			s.app.ToastErr = true
+			s.log.Err("remove failed: " + m.err.Error())
 			return s, nil
 		}
 		if m.rc == 0 && m.dirGone {
@@ -141,11 +150,9 @@ func (s KSUScreen) Update(msg tea.Msg) (KSUScreen, tea.Cmd) {
 			s.app.Builder.ForceCleanReason = "Driver removed"
 			s.app.Builder.Incremental = false
 			_ = s.app.Builder.Save(s.app.Paths.Kernel)
-			s.app.Toast = "Driver removed -- defconfig reset"
-			s.app.ToastErr = false
+			s.log.OK("driver removed; defconfig reset")
 		} else {
-			s.app.Toast = "Cleanup failed or driver already gone (exit " + itoa(m.rc) + ")"
-			s.app.ToastErr = true
+			s.log.Err("cleanup failed or driver already gone (exit " + itoa(m.rc) + ")")
 		}
 		return s, nil
 	}
@@ -235,6 +242,7 @@ func (s KSUScreen) installCmd(branch string) tea.Cmd {
 
 func (s KSUScreen) View() string {
 	w := panelWidth(s.app.Width)
+	innerW := innerContentWidth(w)
 
 	banner := components.Banner(
 		"ReSukiSU  DRIVER  MANAGER",
@@ -246,37 +254,51 @@ func (s KSUScreen) View() string {
 	activeBadge := components.Badge(strings.ToUpper(s.app.Cfg.KSUBranch), BadgeAccent)
 	var sel strings.Builder
 	sel.WriteString(components.KV("Active", activeBadge, 9, LabelStyle, ValueStyle) + "\n")
-	sel.WriteString(components.KV("Target", s.app.Paths.Kernel+"/drivers/kernelsu", 9, LabelStyle, AccentText))
+	sel.WriteString(components.KVWrap("Target",
+		s.app.Paths.Kernel+"/drivers/kernelsu",
+		9, innerW-12, LabelStyle, AccentText))
 	selPanel := components.Panel("Selection", sel.String(), w, PanelBorder, TitleStyle)
 
 	// ── Upstream branch states ──────────────────────────────────────────────
-	// Right-pad branch label to the widest value so badges align in a column.
 	branchW := 4 // max(len("main"), len("dev"))
 	var ups strings.Builder
 	ups.WriteString(probeRow("main", branchW, s.main, s.probed) + "\n")
 	ups.WriteString(probeRow("dev", branchW, s.dev, s.probed))
 	upsPanel := components.Panel("Upstream branches", ups.String(), w, PanelBorder, TitleStyle)
 
-	// ── Action strip ────────────────────────────────────────────────────────
-	actions := components.HotkeyStrip([]components.Hotkey{
-		{Key: "I", Desc: "Install / update", Sub: "from active branch"},
-		{Key: "S", Desc: "Switch", Sub: "main ↔ dev"},
-		{Key: "V", Desc: "Verify guards"},
-		{Key: "X", Desc: "Remove driver"},
-		{Key: "P", Desc: "Re-probe"},
-		{Key: "ESC", Desc: "Back"},
-	}, HotKeyStyle, ValueStyle, DimText, MutedText)
-
-	divider := "  " + components.Separator(innerContentWidth(w), MutedText) + "\n"
-	out := banner + "\n" + selPanel + "\n" + upsPanel + "\n" + divider + "  " + actions + "\n"
-
+	// ── Activity log ────────────────────────────────────────────────────────
+	logBody := s.log.Render(8)
 	if s.busy {
-		out += "\n  " + AccentText.Render(s.stage+" …") + "\n"
+		logBody += "\n" + AccentText.Render(s.stage+" …")
 	}
-	if s.app.Toast != "" {
-		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
-	}
-	return out
+	logPanel := components.Panel("Activity", logBody, w, PanelBorder, TitleStyle)
+
+	// ── Actions panel ───────────────────────────────────────────────────────
+	leader := lipgloss.NewStyle().Foreground(ColorMuted)
+	labelStyle := lipgloss.NewStyle().Foreground(ColorValue).Bold(true)
+	// 2-col leading indent so the [I/S/V/X/P] bracket column lines up
+	// vertically with the [P] tag in upstream branch table above and
+	// with `[X]` brackets across every other screen.
+	mw := innerW - 2
+	var act strings.Builder
+	act.WriteString("  " + components.MenuRow("I", "Install / update",
+		"from active branch", mw, 1,
+		HotKeyStyle, labelStyle, MutedText, leader) + "\n")
+	act.WriteString("  " + components.MenuRow("S", "Switch", "main ↔ dev", mw, 1,
+		HotKeyStyle, labelStyle, MutedText, leader) + "\n")
+	act.WriteString("  " + components.MenuRow("V", "Verify guards", "lint hook patterns", mw, 1,
+		HotKeyStyle, labelStyle, MutedText, leader) + "\n")
+	act.WriteString("  " + components.MenuRow("X", "Remove driver", "uninstall + clean", mw, 1,
+		HotKeyStyle, labelStyle, MutedText, leader) + "\n")
+	act.WriteString("  " + components.MenuRow("P", "Re-probe", "refresh upstream state", mw, 1,
+		HotKeyStyle, labelStyle, MutedText, leader))
+	actPanel := components.Panel("Actions", act.String(), w, PanelBorder, TitleStyle)
+
+	out := strings.Join([]string{
+		banner, selPanel, upsPanel, actPanel, logPanel,
+		"  " + HelpStyle.Render("Select [I/S/V/X/P]\u00a0\u00b7\u00a0esc to return"),
+	}, "\n")
+	return strings.TrimRight(out, "\n ")
 }
 
 // pathExists returns true when p exists (file or dir).
@@ -310,10 +332,10 @@ func itoa(i int) string {
 
 // padTo right-pads a string with spaces to a fixed visible width.
 func padTo(s string, w int) string {
-	if len(s) >= w {
+	if lipgloss.Width(s) >= w {
 		return s
 	}
-	return s + strings.Repeat(" ", w-len(s))
+	return s + components.SafeRepeat(" ", w-lipgloss.Width(s))
 }
 
 // probeRow renders a single branch probe row with all columns aligned
@@ -323,13 +345,19 @@ func padTo(s string, w int) string {
 //	  [dev ]  ABSENT   branch removed upstream
 //	  [foo ]  NETWORK  could not reach upstream
 //
-// branchW is the widest branch label across all rows (used for [..] padding);
+// branchW is the widest branch label across all rows; we pad AFTER the
+// closing bracket (instead of inside it) so [main] and [dev] both hug
+// their labels rather than rendering as [main] / [dev ]. The trailing
+// padding still keeps the badge column aligned.
 // badge text is padded to 7 chars (max of "present"/"absent"/"network").
 func probeRow(branch string, branchW int, p resukisu.Probe, probed bool) string {
 	const badgeW = 7
-	tag := components.BracketTag(strings.TrimSpace(branch), branchW, HotKeyStyle)
+	b := strings.TrimSpace(branch)
+	tag := components.BracketTag(b, len(b), HotKeyStyle)
+	tagPad := components.SafeRepeat(" ", branchW-len(b))
+	prefix := "  " + tag + tagPad + "  "
 	if !probed {
-		return "  " + tag + "  " + DimText.Render("(probing …)")
+		return prefix + DimText.Render("(probing …)")
 	}
 	switch p.State {
 	case resukisu.StatePresent:
@@ -337,15 +365,15 @@ func probeRow(branch string, branchW int, p resukisu.Probe, probed bool) string 
 		if len(short) > 8 {
 			short = short[:8]
 		}
-		return "  " + tag + "  " +
+		return prefix +
 			components.Badge(padTo("PRESENT", badgeW), BadgeOK) + "  " +
 			DimText.Render("HEAD@") + AccentText.Bold(true).Render(short)
 	case resukisu.StateAbsent:
-		return "  " + tag + "  " +
+		return prefix +
 			components.Badge(padTo("ABSENT", badgeW), BadgeWarn) + "  " +
 			DimText.Render("branch removed or merged upstream")
 	case resukisu.StateNetworkFail:
-		return "  " + tag + "  " +
+		return prefix +
 			components.Badge(padTo("NETWORK", badgeW), BadgeErr) + "  " +
 			DimText.Render("could not reach upstream — check connection")
 	}

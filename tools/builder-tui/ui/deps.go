@@ -219,6 +219,11 @@ func (s DepsScreen) Update(msg tea.Msg) (DepsScreen, tea.Cmd) {
 			}
 			s.app.Toast = "$ " + s.installPreview(pkgs)
 			s.app.ToastErr = false
+		case "esc", "q", "r", "b":
+			// Return to Setup wrapper menu — bash do_deps_check returns
+			// to do_setup, not to the main mode menu.
+			s.app.Screen = ScreenSetup
+			return s, nil
 		}
 	}
 	return s, nil
@@ -242,6 +247,7 @@ func (s DepsScreen) installPreview(pkgs []string) string {
 
 func (s DepsScreen) View() string {
 	w := panelWidth(s.app.Width)
+	inner := innerContentWidth(w)
 
 	banner := components.Banner(
 		"DEPENDENCY  CHECK",
@@ -283,21 +289,30 @@ func (s DepsScreen) View() string {
 	}
 	tablePanel := components.Panel("Probes", strings.TrimRight(tbl.String(), "\n"), w, PanelBorder, TitleStyle)
 
-	// Action strip
-	actions := components.HotkeyStrip([]components.Hotkey{
-		{Key: "P", Desc: "Re-probe"},
-		{Key: "C", Desc: "Show install cmd"},
-		{Key: "I", Desc: "Install missing", Sub: "via " + string(s.app.Paths.Distro)},
-		{Key: "ESC", Desc: "Back"},
-	}, HotKeyStyle, ValueStyle, DimText, MutedText)
+	// ── Actions panel ───────────────────────────────────────────────────────
+	leader := lipgloss.NewStyle().Foreground(ColorMuted)
+	labelStyle := lipgloss.NewStyle().Foreground(ColorValue).Bold(true)
+	// 2-col leading indent so [P/C/I] brackets align with the rest
+	// of the screens.
+	mw := inner - 2
+	var act strings.Builder
+	act.WriteString("  " + components.MenuRow("P", "Re-probe", "refresh status", mw, 1,
+		HotKeyStyle, labelStyle, MutedText, leader) + "\n")
+	act.WriteString("  " + components.MenuRow("C", "Show install cmd",
+		"copy/paste manually", mw, 1,
+		HotKeyStyle, labelStyle, MutedText, leader) + "\n")
+	act.WriteString("  " + components.MenuRow("I", "Install missing",
+		"via "+string(s.app.Paths.Distro), mw, 1,
+		HotKeyStyle, labelStyle, MutedText, leader))
+	actPanel := components.Panel("Actions", act.String(), w, PanelBorder, TitleStyle)
 
 	var busyLine string
 	if s.busy {
 		busyLine = "\n  " + lipgloss.NewStyle().Foreground(ColorAccent).Render("⟳  "+s.stage)
 	}
 
-	divider := "  " + components.Separator(innerContentWidth(w), MutedText) + "\n"
-	out := banner + "\n" + statusPanel + "\n" + tablePanel + "\n" + divider + "  " + actions + busyLine + "\n"
+	out := banner + "\n" + statusPanel + "\n" + tablePanel + "\n" + actPanel + "\n" +
+		"  " + HelpStyle.Render("Select [P/C/I]\u00a0\u00b7\u00a0esc to return") + busyLine + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}

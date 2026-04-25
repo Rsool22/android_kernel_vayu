@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/features"
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/state"
@@ -17,9 +18,10 @@ import (
 // Toggles ReSukiSU / SuSFS / KPM in vayu_defconfig with the same
 // cross-feature cascade rules as the original script.
 type FeaturesScreen struct {
-	app   *App
-	state features.State
-	read  bool
+	app    *App
+	state  features.State
+	read   bool
+	cursor int // 0..2 for arrow-nav of the 3 toggle rows
 }
 
 func NewFeaturesScreen(a *App) FeaturesScreen { return FeaturesScreen{app: a} }
@@ -63,7 +65,22 @@ func (s FeaturesScreen) Update(msg tea.Msg) (FeaturesScreen, tea.Cmd) {
 			s.app.ToastErr = true
 			return s, nil
 		}
-		switch strings.ToLower(m.String()) {
+		key := strings.ToLower(m.String())
+		switch key {
+		case "up", "k":
+			if s.cursor > 0 {
+				s.cursor--
+			}
+			return s, nil
+		case "down", "j":
+			if s.cursor < 2 {
+				s.cursor++
+			}
+			return s, nil
+		case "enter", " ":
+			key = []string{"1", "2", "3"}[s.cursor]
+		}
+		switch key {
 		case "1":
 			st, err := features.ToggleKSU(dc, s.state)
 			s.state = st
@@ -109,6 +126,18 @@ func (s FeaturesScreen) Update(msg tea.Msg) (FeaturesScreen, tea.Cmd) {
 			s.app.ToastErr = false
 		case "m":
 			return s, s.runMenuconfig()
+		case "c", "b", "esc":
+			// [C] (Confirm & Continue), [B] (Back), and esc all return
+			// to Build Options, which is the screen that opened this
+			// one via [F]. [C] is kept as a familiar alias from the
+			// bash original; the linear Main → BuildOptions → Build
+			// pipeline never auto-advances through Features.
+			s.app.Screen = ScreenBuildOptions
+			return s, s.app.buildOpts.Init()
+		case "q":
+			// In bash this quits the whole script; preserve the same
+			// shortcut here.
+			return s, tea.Quit
 		}
 	case menuconfigDoneMsg:
 		s.handleMenuconfigDone(m)
@@ -205,29 +234,36 @@ func configMtime(p string) int64 {
 }
 
 // featureRow renders one feature row with [N] tag, label, and a status
-// badge. All four badge variants (ENABLED/DISABLED/N/A/NO DRIVER) are
-// padded to a fixed width so they line up across rows.
-func featureRow(num, name string, enabled, available, driver bool) string {
+// badge dot-leader-aligned to the right edge of the panel — matching
+// the [F]/[C]/[R] action rows on Toolchain and Build Options. All four
+// badge variants (ENABLED/DISABLED/N/A/NO DRIVER) are padded to a
+// fixed width so they line up across rows.
+func featureRow(num, name string, enabled, available, driver, hovered bool, width int) string {
 	const badgeW = 10
-	tag := components.BracketTag(num, 1, HotKeyStyle)
+	var nameStyle lipgloss.Style
+	var badge string
 	switch {
 	case !driver:
-		return "  " + tag + "  " +
-			ValueStyle.Render(name) + "  " +
-			components.Badge(padTo("NO DRIVER", badgeW), BadgeErr)
+		nameStyle = ValueStyle
+		badge = components.Badge(padTo("NO DRIVER", badgeW), BadgeErr)
 	case !available:
-		return "  " + tag + "  " +
-			DimText.Render(name) + "  " +
-			components.Badge(padTo("N/A", badgeW), BadgeWarn)
+		nameStyle = DimText
+		badge = components.Badge(padTo("N/A", badgeW), BadgeWarn)
 	case enabled:
-		return "  " + tag + "  " +
-			ValueStyle.Bold(true).Render(name) + "  " +
-			components.Badge(padTo("ENABLED", badgeW), BadgeOK)
+		nameStyle = ValueStyle.Bold(true)
+		badge = components.Badge(padTo("ENABLED", badgeW), BadgeOK)
 	default:
-		return "  " + tag + "  " +
-			DimText.Render(name) + "  " +
-			components.Badge(padTo("DISABLED", badgeW), BadgeAccent)
+		nameStyle = DimText
+		badge = components.Badge(padTo("DISABLED", badgeW), BadgeAccent)
 	}
+	mark := "  "
+	if hovered {
+		mark = AccentText.Render(" ›")
+	}
+	tag := components.BracketTag(num, 1, HotKeyStyle)
+	prefix := mark + tag + "  " + nameStyle.Render(name)
+	pad := width - lipgloss.Width(prefix) - lipgloss.Width(badge)
+	return prefix + components.DotLeader(pad, MutedText) + badge
 }
 
 func (s FeaturesScreen) View() string {
@@ -235,7 +271,6 @@ func (s FeaturesScreen) View() string {
 		s.refresh()
 	}
 	w := panelWidth(s.app.Width)
-	innerW := innerContentWidth(w)
 
 	banner := components.Banner(
 		"FEATURE  CONFIGURATION",
@@ -247,37 +282,42 @@ func (s FeaturesScreen) View() string {
 	driver := st.DriverPresent
 
 	// ── Toggles panel ───────────────────────────────────────────────────────
+	rows := []struct {
+		key, name string
+		enabled   bool
+		avail     bool
+	}{
+		{"1", "ReSukiSU  (CONFIG_KSU)", st.KSU, true},
+		{"2", "SuSFS     (CONFIG_KSU_SUSFS)", st.SUSFS, st.KSU},
+		{"3", "KPM       (CONFIG_KPM)", st.KPM, st.KSU},
+	}
+	inner := innerContentWidth(w)
 	var p strings.Builder
-	p.WriteString(featureRow("1", "ReSukiSU  (CONFIG_KSU)", st.KSU, true, driver) + "\n")
-	p.WriteString(featureRow("2", "SuSFS     (CONFIG_KSU_SUSFS)", st.SUSFS, st.KSU, driver) + "\n")
-	p.WriteString(featureRow("3", "KPM       (CONFIG_KPM)", st.KPM, st.KSU, driver))
+	for i, r := range rows {
+		row := featureRow(r.key, r.name, r.enabled, r.avail, driver, i == s.cursor, inner)
+		p.WriteString(row)
+		if i < len(rows)-1 {
+			p.WriteString("\n")
+		}
+	}
 	togPanel := components.Panel("Toggles", p.String(), w, PanelBorder, TitleStyle)
 
 	// ── Summary panel ───────────────────────────────────────────────────────
+	valW := inner - 14 // 11 (label col) + " : "
 	var sm strings.Builder
-	sm.WriteString(components.KV("Hook Mode", st.HookMode(), 11, LabelStyle, AccentText) + "\n")
-	sm.WriteString(components.KV("Caption", st.CapTag(s.app.Cfg.KSUBranch), 11, LabelStyle, ValueStyle) + "\n")
-	sm.WriteString(components.KV("Extras", st.ExtTag(), 11, LabelStyle, ValueStyle) + "\n")
+	sm.WriteString(components.KVWrap("Hook Mode", st.HookMode(), 11, valW, LabelStyle, AccentText) + "\n")
+	sm.WriteString(components.KVWrap("Caption", st.CapTag(s.app.Cfg.KSUBranch), 11, valW, LabelStyle, ValueStyle) + "\n")
+	sm.WriteString(components.KVWrap("Extras", st.ExtTag(), 11, valW, LabelStyle, ValueStyle) + "\n")
 	dc := s.defconfigPath()
 	if dc == "" {
-		sm.WriteString(components.KV("Defconfig", "(kernel root unresolved)", 11, LabelStyle, ErrText))
+		sm.WriteString(components.KVWrap("Defconfig", "(kernel root unresolved)", 11, valW, LabelStyle, ErrText))
 	} else {
-		sm.WriteString(components.KV("Defconfig", dc, 11, LabelStyle, DimText))
+		sm.WriteString(components.KVWrap("Defconfig", dc, 11, valW, LabelStyle, DimText))
 	}
 	sumPanel := components.Panel("Active features", sm.String(), w, PanelBorder, TitleStyle)
 
-	// ── Action strip ────────────────────────────────────────────────────────
-	actions := components.HotkeyStrip([]components.Hotkey{
-		{Key: "1", Desc: "ReSukiSU", Sub: "toggle"},
-		{Key: "2", Desc: "SuSFS", Sub: "toggle"},
-		{Key: "3", Desc: "KPM", Sub: "toggle"},
-		{Key: "M", Desc: "Menuconfig", Sub: "interactive"},
-		{Key: "R", Desc: "Reload"},
-		{Key: "ESC", Desc: "Back"},
-	}, HotKeyStyle, ValueStyle, DimText, MutedText)
-
-	divider := "  " + components.Separator(innerW, MutedText) + "\n"
-	out := banner + "\n" + togPanel + "\n" + sumPanel + "\n" + divider + "  " + actions + "\n"
+	out := banner + "\n" + togPanel + "\n" + sumPanel + "\n" +
+		"  " + HelpStyle.Render("Select [1/2/3/M/R/C]\u00a0\u00b7\u00a0esc to return") + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}

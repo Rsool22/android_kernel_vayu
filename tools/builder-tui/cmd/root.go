@@ -38,15 +38,25 @@ power users perform individual actions headlessly:
 			fmt.Fprintln(os.Stderr, "warning: load config:", err)
 			cfg = config.Defaults()
 		}
-		switch rootStyle {
-		case "modern":
-			ui.ApplyStyle(ui.StyleModern)
-		case "", "bash":
-			ui.ApplyStyle(ui.StyleBash)
-		default:
-			fmt.Fprintf(os.Stderr, "warning: unknown --style %q (using bash)\n", rootStyle)
-			ui.ApplyStyle(ui.StyleBash)
+		// Theme precedence: --style flag → persisted Cfg.Theme → "bash".
+		// Unknown values fall back to bash with a warning so a stale
+		// config never leaves the screen unstyled.
+		theme := rootStyle
+		if theme == "" {
+			theme = cfg.Theme
 		}
+		known := false
+		for _, n := range ui.StyleNames {
+			if n == theme {
+				known = true
+				break
+			}
+		}
+		if !known && theme != "" {
+			fmt.Fprintf(os.Stderr, "warning: unknown theme %q (using bash)\n", theme)
+			theme = "bash"
+		}
+		ui.ApplyStyle(ui.ParseStyle(theme))
 		app := ui.NewApp(cfg)
 		p := tea.NewProgram(app, tea.WithAltScreen())
 		ui.Program = p
