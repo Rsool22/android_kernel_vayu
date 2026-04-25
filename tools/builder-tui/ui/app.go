@@ -2,11 +2,14 @@ package ui
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/config"
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/discover"
+	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/state"
 )
 
 // Screen is a discriminator for which child model is active.
@@ -29,13 +32,26 @@ var Program *tea.Program
 // App is the root tea.Model. It holds shared state (config, paths, terminal
 // size) and delegates render/update to the active child screen.
 type App struct {
-	Cfg       config.Config
-	Paths     discover.Paths
-	Width     int
-	Height    int
-	Screen    Screen
-	Toast     string
-	ToastErr  bool
+	Cfg      config.Config
+	Paths    discover.Paths
+	Width    int
+	Height   int
+	Screen   Screen
+	Toast    string
+	ToastErr bool
+
+	// Builder is the persisted .builder_state (incremental, ccache, branch,
+	// force-clean reason). Reloaded after every persistence-affecting action.
+	Builder state.Builder
+	// PrevBuild is the last successful build summary (rendered on the Mode
+	// menu's gray "Previous Build" panel).
+	PrevBuild state.PrevBuild
+	// HasImage is true when out/arch/arm64/boot/Image exists, gating the
+	// package-only entry on the mode menu.
+	HasImage bool
+	// MenuconfigPreserved is true when .menuconfig_saved_config exists and
+	// will be restored on the next build (banner shown on Mode menu).
+	MenuconfigPreserved bool
 
 	main      MainMenu
 	toolchain ToolchainScreen
@@ -55,6 +71,7 @@ func NewApp(cfg config.Config) *App {
 		Width:  80,
 		Height: 24,
 	}
+	a.refreshPersistence()
 	a.main = NewMainMenu(a)
 	a.toolchain = NewToolchainScreen(a)
 	a.ksu = NewKSUScreen(a)
@@ -174,6 +191,23 @@ func (a *App) PersistConfig() {
 	}
 	a.Toast = "Config saved."
 	a.ToastErr = false
+}
+
+// refreshPersistence reloads the per-kernel-tree state files plus the
+// out/Image / preserved-menuconfig flags. Call after any action that may
+// have mutated them (build, branch switch, counter reset, menuconfig).
+func (a *App) refreshPersistence() {
+	if a.Paths.Kernel != "" {
+		a.Builder = state.LoadBuilder(a.Paths.Kernel)
+		a.PrevBuild = state.LoadPrevBuild(a.Paths.Kernel)
+		a.MenuconfigPreserved = state.MenuconfigPreserved(a.Paths.Kernel)
+	}
+	a.HasImage = false
+	if a.Paths.Output != "" {
+		if _, err := os.Stat(filepath.Join(a.Paths.Output, "arch", "arm64", "boot", "Image")); err == nil {
+			a.HasImage = true
+		}
+	}
 }
 
 // Bg returns a fresh detachable context for background ops launched via Cmd.
