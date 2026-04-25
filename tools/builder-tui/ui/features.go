@@ -17,9 +17,10 @@ import (
 // Toggles ReSukiSU / SuSFS / KPM in vayu_defconfig with the same
 // cross-feature cascade rules as the original script.
 type FeaturesScreen struct {
-	app   *App
-	state features.State
-	read  bool
+	app    *App
+	state  features.State
+	read   bool
+	cursor int // 0..2 for arrow-nav of the 3 toggle rows
 }
 
 func NewFeaturesScreen(a *App) FeaturesScreen { return FeaturesScreen{app: a} }
@@ -63,7 +64,22 @@ func (s FeaturesScreen) Update(msg tea.Msg) (FeaturesScreen, tea.Cmd) {
 			s.app.ToastErr = true
 			return s, nil
 		}
-		switch strings.ToLower(m.String()) {
+		key := strings.ToLower(m.String())
+		switch key {
+		case "up", "k":
+			if s.cursor > 0 {
+				s.cursor--
+			}
+			return s, nil
+		case "down", "j":
+			if s.cursor < 2 {
+				s.cursor++
+			}
+			return s, nil
+		case "enter", " ":
+			key = []string{"1", "2", "3"}[s.cursor]
+		}
+		switch key {
 		case "1":
 			st, err := features.ToggleKSU(dc, s.state)
 			s.state = st
@@ -246,10 +262,32 @@ func (s FeaturesScreen) View() string {
 	driver := st.DriverPresent
 
 	// ── Toggles panel ───────────────────────────────────────────────────────
+	rows := []struct {
+		key, name string
+		enabled   bool
+		avail     bool
+	}{
+		{"1", "ReSukiSU  (CONFIG_KSU)", st.KSU, true},
+		{"2", "SuSFS     (CONFIG_KSU_SUSFS)", st.SUSFS, st.KSU},
+		{"3", "KPM       (CONFIG_KPM)", st.KPM, st.KSU},
+	}
 	var p strings.Builder
-	p.WriteString(featureRow("1", "ReSukiSU  (CONFIG_KSU)", st.KSU, true, driver) + "\n")
-	p.WriteString(featureRow("2", "SuSFS     (CONFIG_KSU_SUSFS)", st.SUSFS, st.KSU, driver) + "\n")
-	p.WriteString(featureRow("3", "KPM       (CONFIG_KPM)", st.KPM, st.KSU, driver))
+	for i, r := range rows {
+		mark := "  "
+		if i == s.cursor {
+			mark = AccentText.Render(" ›")
+		}
+		row := featureRow(r.key, r.name, r.enabled, r.avail, driver)
+		// featureRow already starts with "  " — replace its leading marker
+		// with our cursor chevron when this is the active row.
+		if strings.HasPrefix(row, "  ") {
+			row = mark + row[2:]
+		}
+		p.WriteString(row)
+		if i < len(rows)-1 {
+			p.WriteString("\n")
+		}
+	}
 	togPanel := components.Panel("Toggles", p.String(), w, PanelBorder, TitleStyle)
 
 	// ── Summary panel ───────────────────────────────────────────────────────
