@@ -1,12 +1,15 @@
 package ui
 
 import (
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/features"
+	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/state"
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/ui/components"
 )
 
@@ -104,9 +107,101 @@ func (s FeaturesScreen) Update(msg tea.Msg) (FeaturesScreen, tea.Cmd) {
 			s.refresh()
 			s.app.Toast = "Defconfig re-read."
 			s.app.ToastErr = false
+		case "m":
+			return s, s.runMenuconfig()
 		}
+	case menuconfigDoneMsg:
+		s.handleMenuconfigDone(m)
+		s.refresh()
 	}
 	return s, nil
+}
+
+// menuconfigDoneMsg carries the result of an interactive `make menuconfig`
+// session: whether .config mtime advanced (changes saved), exit code, and
+// any error from the wrapper.
+type menuconfigDoneMsg struct {
+	saved   bool
+	rc      int
+	err     error
+	cfgPath string
+}
+
+// runMenuconfig suspends the TUI, runs `make menuconfig` interactively,
+// then resumes and emits a menuconfigDoneMsg with the outcome.
+func (s FeaturesScreen) runMenuconfig() tea.Cmd {
+	if s.app.Paths.Kernel == "" || s.app.Paths.Output == "" {
+		s.app.Toast = "Kernel/output paths unresolved -- run Setup first"
+		s.app.ToastErr = true
+		return nil
+	}
+	cfg := filepath.Join(s.app.Paths.Output, ".config")
+	mtimeBefore := configMtime(cfg)
+
+	cc := "clang"
+	if s.app.Builder.UseCcache {
+		cc = "ccache clang"
+	}
+	cmd := exec.Command(
+		"make", "-C", s.app.Paths.Kernel,
+		"O="+s.app.Paths.Output,
+		"ARCH=arm64", "LLVM=1", "LLVM_IAS=1", "CC="+cc,
+		"menuconfig",
+	)
+	if s.app.Paths.Clang != "" {
+		path := os.Getenv("PATH")
+		cmd.Env = append(os.Environ(), "PATH="+filepath.Join(s.app.Paths.Clang, "bin")+":"+path)
+	}
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		rc := 0
+		if err != nil {
+			if ee, ok := err.(*exec.ExitError); ok {
+				rc = ee.ExitCode()
+			} else {
+				rc = -1
+			}
+		}
+		return menuconfigDoneMsg{
+			saved:   configMtime(cfg) > mtimeBefore && rc == 0,
+			rc:      rc,
+			err:     err,
+			cfgPath: cfg,
+		}
+	})
+}
+
+// handleMenuconfigDone processes the menuconfig result: mark MenuconfigUsed
+// when changes were saved, clear preserved file (mtime advance overrides
+// any pending preserved .config), and surface a toast.
+func (s FeaturesScreen) handleMenuconfigDone(m menuconfigDoneMsg) {
+	if m.err != nil && m.rc < 0 {
+		s.app.Toast = "Menuconfig failed: " + m.err.Error()
+		s.app.ToastErr = true
+		return
+	}
+	if m.rc != 0 {
+		s.app.Toast = "Menuconfig aborted -- no changes applied"
+		s.app.ToastErr = false
+		return
+	}
+	if !m.saved {
+		s.app.Toast = "Menuconfig closed without saving -- no changes"
+		s.app.ToastErr = false
+		return
+	}
+	s.app.MenuconfigUsed = true
+	state.ClearMenuconfigPreserve(s.app.Paths.Kernel)
+	s.app.MenuconfigPreserved = false
+	s.app.Toast = "Menuconfig saved (Stage 2 defconfig regen skipped this session)"
+	s.app.ToastErr = false
+}
+
+// configMtime returns the file mtime in unix seconds (or 0 when missing).
+func configMtime(p string) int64 {
+	if st, err := os.Stat(p); err == nil {
+		return st.ModTime().Unix()
+	}
+	return 0
 }
 
 // featureRow renders one feature row with [N] tag, label, and a status
@@ -176,7 +271,8 @@ func (s FeaturesScreen) View() string {
 		{Key: "1", Desc: "ReSukiSU", Sub: "toggle"},
 		{Key: "2", Desc: "SuSFS", Sub: "toggle"},
 		{Key: "3", Desc: "KPM", Sub: "toggle"},
-		{Key: "R", Desc: "Reload", Sub: "re-read defconfig"},
+		{Key: "M", Desc: "Menuconfig", Sub: "interactive"},
+		{Key: "R", Desc: "Reload"},
 		{Key: "ESC", Desc: "Back"},
 	}, HotKeyStyle, ValueStyle, DimText, MutedText)
 

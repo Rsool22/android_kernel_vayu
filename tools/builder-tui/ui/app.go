@@ -53,6 +53,10 @@ type App struct {
 	// MenuconfigPreserved is true when .menuconfig_saved_config exists and
 	// will be restored on the next build (banner shown on Mode menu).
 	MenuconfigPreserved bool
+	// MenuconfigUsed is true when the user ran [M] menuconfig in the
+	// current session and the .config mtime advanced -- next build's
+	// Stage 2 will use olddefconfig instead of make <defconfig>.
+	MenuconfigUsed bool
 
 	main       MainMenu
 	toolchain  ToolchainScreen

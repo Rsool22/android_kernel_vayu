@@ -3,6 +3,8 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -144,6 +146,14 @@ func (s BuildScreen) Update(msg tea.Msg) (BuildScreen, tea.Cmd) {
 		if m.Row > s.revealed {
 			s.revealed = m.Row
 		}
+	case savedefconfigDoneMsg:
+		if m.err != nil {
+			s.app.Toast = "savedefconfig failed: " + m.err.Error()
+			s.app.ToastErr = true
+		} else {
+			s.app.Toast = "vayu_defconfig updated from in-session menuconfig"
+			s.app.ToastErr = false
+		}
 	case tea.KeyMsg:
 		if !s.postBuild && !s.running {
 			switch strings.ToLower(m.String()) {
@@ -181,6 +191,24 @@ func (s BuildScreen) handlePostBuild(m tea.KeyMsg) (BuildScreen, tea.Cmd) {
 		s.app.Builder.Incremental = true
 		_ = s.app.Builder.Save(s.app.Paths.Kernel)
 		return s.startBuild()
+	case "v":
+		if s.app.MenuconfigUsed {
+			cfg := filepath.Join(s.app.Paths.Output, ".config")
+			if err := state.SaveMenuconfigPreserve(s.app.Paths.Kernel, cfg); err != nil {
+				s.app.Toast = "Preserve failed: " + err.Error()
+				s.app.ToastErr = true
+			} else {
+				s.app.MenuconfigPreserved = true
+				s.app.Toast = "Menuconfig .config preserved -- restored on next build"
+				s.app.ToastErr = false
+			}
+		}
+		return s, nil
+	case "d":
+		if s.app.MenuconfigUsed {
+			return s, s.runSavedefconfig()
+		}
+		return s, nil
 	case "r":
 		s.postBuild = false
 		s.app.Screen = ScreenMain
@@ -189,6 +217,55 @@ func (s BuildScreen) handlePostBuild(m tea.KeyMsg) (BuildScreen, tea.Cmd) {
 		return s, tea.Quit
 	}
 	return s, nil
+}
+
+// savedefconfigDoneMsg reports the result of a `make savedefconfig` run
+// triggered by post-build [D].
+type savedefconfigDoneMsg struct {
+	err error
+}
+
+// runSavedefconfig regenerates a defconfig from the in-tree .config and
+// copies it over arch/arm64/configs/vayu_defconfig (mirrors bash [D]).
+func (s BuildScreen) runSavedefconfig() tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		cc := "clang"
+		if s.app.Builder.UseCcache {
+			cc = "ccache clang"
+		}
+		args := []string{
+			"-C", s.app.Paths.Kernel,
+			"O=" + s.app.Paths.Output,
+			"ARCH=arm64", "LLVM=1", "LLVM_IAS=1", "CC=" + cc,
+			"savedefconfig",
+		}
+		_ = ctx
+		cmd := exec.Command("make", args...)
+		cmd.Dir = s.app.Paths.Kernel
+		out, err := cmd.CombinedOutput()
+		_ = out
+		if err != nil {
+			return savedefconfigDoneMsg{err: err}
+		}
+		src := filepath.Join(s.app.Paths.Output, "defconfig")
+		dst := filepath.Join(s.app.Paths.Kernel, "arch", "arm64", "configs", "vayu_defconfig")
+		if err := copyToFile(src, dst); err != nil {
+			return savedefconfigDoneMsg{err: err}
+		}
+		s.app.MenuconfigUsed = false
+		state.ClearMenuconfigPreserve(s.app.Paths.Kernel)
+		s.app.MenuconfigPreserved = false
+		return savedefconfigDoneMsg{}
+	}
+}
+
+func copyToFile(src, dst string) error {
+	in, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, in, 0o644)
 }
 
 // startBuild kicks off a new pipeline run on a goroutine, hands back a Cmd
@@ -232,19 +309,25 @@ func (s BuildScreen) startBuild() (BuildScreen, tea.Cmd) {
 	zipName := naming.ZipName(args)
 	zipPath := filepath.Join(s.app.Paths.Output, zipName)
 
+	preservedCfg := ""
+	if s.app.MenuconfigPreserved {
+		preservedCfg = filepath.Join(s.app.Paths.Kernel, ".menuconfig_saved_config")
+	}
 	opts := pipeline.Options{
-		KernelDir:   s.app.Paths.Kernel,
-		OutputDir:   s.app.Paths.Output,
-		ClangDir:    s.app.Paths.Clang,
-		GccArm64:    s.app.Paths.GccArm64,
-		GccArm:      s.app.Paths.GccArm,
-		AnyKernel:   s.app.Paths.AnyKernel,
-		Defconfig:   "vayu_defconfig",
-		Incremental: s.app.Builder.Incremental,
-		UseCcache:   s.app.Builder.UseCcache,
-		KernelName:  s.app.Cfg.KernelName,
-		ForceClean:  s.app.Builder.ForceCleanReason,
-		ZipPath:     zipPath,
+		KernelDir:     s.app.Paths.Kernel,
+		OutputDir:     s.app.Paths.Output,
+		ClangDir:      s.app.Paths.Clang,
+		GccArm64:      s.app.Paths.GccArm64,
+		GccArm:        s.app.Paths.GccArm,
+		AnyKernel:     s.app.Paths.AnyKernel,
+		Defconfig:     "vayu_defconfig",
+		Incremental:   s.app.Builder.Incremental,
+		UseCcache:     s.app.Builder.UseCcache,
+		KernelName:    s.app.Cfg.KernelName,
+		ForceClean:    s.app.Builder.ForceCleanReason,
+		SkipDefconfig: s.app.MenuconfigUsed || s.app.MenuconfigPreserved,
+		PreservedCfg:  preservedCfg,
+		ZipPath:       zipPath,
 	}
 
 	go runPipelineGoroutine(ctx, opts, st)
@@ -523,9 +606,17 @@ func (s BuildScreen) renderActions() string {
 		items := []components.Hotkey{
 			{Key: "T", Desc: "Retry full clean"},
 			{Key: "I", Desc: "Retry incremental"},
-			{Key: "R", Desc: "Return to main"},
-			{Key: "E", Desc: "Exit"},
 		}
+		if s.app.MenuconfigUsed {
+			items = append(items,
+				components.Hotkey{Key: "V", Desc: "Preserve menuconfig"},
+				components.Hotkey{Key: "D", Desc: "Write defconfig"},
+			)
+		}
+		items = append(items,
+			components.Hotkey{Key: "R", Desc: "Return to main"},
+			components.Hotkey{Key: "E", Desc: "Exit"},
+		)
 		return components.HotkeyStrip(items, HotKeyStyle, ValueStyle, DimText, MutedText)
 	}
 	return components.HotkeyStrip([]components.Hotkey{
