@@ -5,8 +5,9 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/kbuild"
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/ui/components"
@@ -25,6 +26,10 @@ type BuildScreen struct {
 
 func NewBuildScreen(a *App) BuildScreen {
 	vp := viewport.New(80, 18)
+	vp.Style = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder(), true).
+		BorderForeground(ColorBuild).
+		Padding(0, 1)
 	return BuildScreen{app: a, vp: vp}
 }
 
@@ -40,7 +45,7 @@ func (s BuildScreen) Update(msg tea.Msg) (BuildScreen, tea.Cmd) {
 		if s.vp.Width < 40 {
 			s.vp.Width = 40
 		}
-		s.vp.Height = m.Height - 12
+		s.vp.Height = m.Height - 14
 		if s.vp.Height < 8 {
 			s.vp.Height = 8
 		}
@@ -79,30 +84,58 @@ func (s BuildScreen) Update(msg tea.Msg) (BuildScreen, tea.Cmd) {
 }
 
 func (s BuildScreen) View() string {
-	w := s.app.Width
-	if w < 60 {
-		w = 60
-	}
-	if w > 120 {
-		w = 120
-	}
+	w := clampWidth(s.app.Width, 64, 130)
 
-	var b strings.Builder
-	b.WriteString(components.Banner("BUILD  KERNEL", s.app.Paths.Kernel, w, ColorTitle, ColorAccent) + "\n")
-	b.WriteString(components.Rule("", w, MutedText) + "\n\n")
-	b.WriteString("  " + AccentText.Render("Press [B] to start build, [ESC] to return.") + "\n\n")
+	banner := components.Banner(
+		"BUILD  KERNEL",
+		s.app.Paths.Kernel,
+		w, BannerBorder, BannerTitle, BannerSubtle,
+	)
 
-	b.WriteString(components.Rule("Compiler output", w, MutedText) + "\n")
-	b.WriteString(s.vp.View() + "\n")
+	// ── Status panel ────────────────────────────────────────────────────────
+	var st strings.Builder
+	clangVal := okOr(s.app.Paths.Clang, "(not installed)")
+	clangSty := ValueStyle
+	if s.app.Paths.Clang == "" {
+		clangSty = ErrText
+	}
+	st.WriteString(components.KV("Source", sourceLabel(s.app.Cfg), 11, LabelStyle, AccentText) + "\n")
+	st.WriteString(components.KV("Clang", clangVal, 11, LabelStyle, clangSty) + "\n")
+	st.WriteString(components.KV("KSU", s.app.Cfg.KSUBranch, 11, LabelStyle, ValueStyle) + "\n")
+	statusSty := WarnText
+	statusVal := "idle — press [B] to start"
+	if s.busy {
+		statusSty = AccentText
+		statusVal = "compiling …"
+	}
+	if s.result != nil {
+		if s.result.ExitCode == 0 {
+			statusSty = OKText
+			statusVal = "build OK · " + kbuild.FormatElapsed(s.result.Elapsed)
+		} else {
+			statusSty = ErrText
+			statusVal = "build failed · exit " + itoa(s.result.ExitCode)
+		}
+	}
+	st.WriteString(components.KV("Status", statusVal, 11, LabelStyle, statusSty))
+	statusPanel := components.Panel("Build status", st.String(), w, PanelBorder, TitleStyle)
+
+	// ── Compiler output viewport ─────────────────────────────────────────────
+	vpHeader := lipgloss.NewStyle().Foreground(ColorBuild).Bold(true).Render("  Compiler output ") +
+		MutedText.Render(strings.Repeat("─", w-22)) + "\n"
+
+	actions := components.HotkeyStrip([]string{
+		components.Hotkey("B", "Build", "compile + package", HotKeyStyle, OKText, DimText),
+		components.Hotkey("↑/↓", "Scroll", "compiler output", HotKeyStyle, AccentText, DimText),
+		components.Hotkey("ESC", "Back", "", HotKeyStyle, DimText, DimText),
+	}, MutedText)
+
+	out := banner + "\n" + statusPanel + "\n" + vpHeader + s.vp.View() + "\n\n  " + actions + "\n"
 
 	if s.app.Toast != "" {
-		st := OKText
-		if s.app.ToastErr {
-			st = ErrText
-		}
-		b.WriteString("\n" + st.Render("  "+s.app.Toast))
+		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}
-	return b.String()
+	return out
 }
 
 func (s BuildScreen) runCmd() tea.Cmd {

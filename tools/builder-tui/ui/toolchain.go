@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/progress"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/clang"
@@ -26,7 +26,7 @@ type ToolchainScreen struct {
 }
 
 func NewToolchainScreen(a *App) ToolchainScreen {
-	p := progress.New(progress.WithDefaultGradient())
+	p := progress.New(progress.WithGradient("#5fafff", "#5fffd7"))
 	p.Width = 60
 	return ToolchainScreen{app: a, prog: p}
 }
@@ -63,7 +63,6 @@ func (s ToolchainScreen) Update(msg tea.Msg) (ToolchainScreen, tea.Cmd) {
 			s.app.Cfg.ZyCTarget = "latest"
 			s.app.PersistConfig()
 		case "1":
-			// 1->15 (placeholder; "23" handled below as a sequence is awkward in bubbletea so we use 1/2/L)
 			s.app.Cfg.ClangSource = config.ClangZyC
 			s.app.Cfg.ZyCTarget = "15"
 			s.app.PersistConfig()
@@ -117,72 +116,74 @@ func (s ToolchainScreen) Update(msg tea.Msg) (ToolchainScreen, tea.Cmd) {
 }
 
 func (s ToolchainScreen) View() string {
-	w := s.app.Width
-	if w < 60 {
-		w = 60
-	}
-	if w > 100 {
-		w = 100
-	}
+	w := clampWidth(s.app.Width, 64, 110)
 
-	var b strings.Builder
-	b.WriteString(components.Banner("TOOLCHAIN  MANAGER", string(s.app.Cfg.ClangSource), w, ColorTitle, ColorAccent) + "\n")
-	b.WriteString(components.Rule("", w, MutedText) + "\n\n")
+	// ── Banner ───────────────────────────────────────────────────────────────
+	banner := components.Banner(
+		"TOOLCHAIN  MANAGER",
+		"Google AOSP clang  ·  ZyC Clang fallback",
+		w, BannerBorder, BannerTitle, BannerSubtle,
+	)
 
-	statusKey := lipgloss.NewStyle().Foreground(ColorDim)
-	statusVal := lipgloss.NewStyle().Foreground(ColorAccent)
-	b.WriteString(components.KV("Source", sourceLabel(s.app.Cfg), 12, statusKey, statusVal) + "\n")
-	b.WriteString(components.KV("Origin", sourceOrigin(s.app.Cfg.ClangSource), 12, statusKey, statusVal) + "\n")
+	// ── Current state panel ─────────────────────────────────────────────────
+	var st strings.Builder
+	st.WriteString(components.KV("Source", sourceLabel(s.app.Cfg), 11, LabelStyle, ValueStyle) + "\n")
+	st.WriteString(components.KV("Origin", sourceOrigin(s.app.Cfg.ClangSource), 11, LabelStyle, AccentText) + "\n")
 	local := clang.LocalVersion(s.app.Paths.Clang)
 	if local == "" {
-		b.WriteString(components.KV("Local", "(not installed)", 12, statusKey, ErrText) + "\n")
+		st.WriteString(components.KV("Local", "(not installed)", 11, LabelStyle, ErrText) + "\n")
 	} else {
-		b.WriteString(components.KV("Local", local, 12, statusKey, OKText) + "\n")
+		st.WriteString(components.KV("Local", local, 11, LabelStyle, OKText) + "\n")
 	}
-	b.WriteString(components.KV("Install", okOr(s.app.Paths.Clang, "(unset)"), 12, statusKey, MutedText) + "\n")
+	st.WriteString(components.KV("Install", okOr(s.app.Paths.Clang, "(unset)"), 11, LabelStyle, MutedText))
 	if s.last != "" {
-		b.WriteString(components.KV("Latest", s.last, 12, statusKey, AccentText) + "\n")
+		st.WriteString("\n" + components.KV("Latest", s.last, 11, LabelStyle, OKText))
 	}
-	b.WriteString("\n")
+	statePanel := components.Panel("State", st.String(), w, PanelBorder, TitleStyle)
 
-	b.WriteString(components.Rule("Source", w, MutedText) + "\n")
-	b.WriteString(srcRow("A", "Auto: Google primary, ZyC fallback", s.app.Cfg.ClangSource == config.ClangAuto) + "\n")
-	b.WriteString(srcRow("G", "Google AOSP clang", s.app.Cfg.ClangSource == config.ClangGoogle) + "\n")
-	b.WriteString(srcRow("Z", "ZyC Clang (community)", s.app.Cfg.ClangSource == config.ClangZyC) + "\n")
+	// ── Source selector panel ───────────────────────────────────────────────
+	innerW := w - 4 - 2 // panel padding
+	var src strings.Builder
+	src.WriteString(srcRow("A", "Auto: Google primary, ZyC fallback", s.app.Cfg.ClangSource == config.ClangAuto, innerW) + "\n")
+	src.WriteString(srcRow("G", "Google AOSP clang (android.googlesource.com)", s.app.Cfg.ClangSource == config.ClangGoogle, innerW) + "\n")
+	src.WriteString(srcRow("Z", "ZyC Clang (community / GitHub releases)", s.app.Cfg.ClangSource == config.ClangZyC, innerW))
 	if s.app.Cfg.ClangSource == config.ClangZyC {
-		b.WriteString("\n")
-		b.WriteString(components.Rule("ZyC target", w, MutedText) + "\n")
-		b.WriteString(srcRow("2", "ZyC Clang 23.x", s.app.Cfg.ZyCTarget == "23") + "\n")
-		b.WriteString(srcRow("1", "ZyC Clang 15.x", s.app.Cfg.ZyCTarget == "15") + "\n")
-		b.WriteString(srcRow("L", "Latest (any version)", s.app.Cfg.ZyCTarget == "latest") + "\n")
+		src.WriteString("\n" + components.Rule("ZyC target", innerW, MutedText) + "\n")
+		src.WriteString(srcRow("2", "ZyC Clang 23.x (current)", s.app.Cfg.ZyCTarget == "23", innerW) + "\n")
+		src.WriteString(srcRow("1", "ZyC Clang 15.x (legacy)", s.app.Cfg.ZyCTarget == "15", innerW) + "\n")
+		src.WriteString(srcRow("L", "Latest (any version)", s.app.Cfg.ZyCTarget == "latest", innerW))
 	}
-	b.WriteString("\n")
-	b.WriteString(components.Rule("Action", w, MutedText) + "\n")
-	b.WriteString(components.Hotkey("F", "Fetch selected", "check + download", HotKeyStyle, lipgloss.NewStyle().Foreground(ColorOK), DimText) + "\n")
-	b.WriteString(components.Hotkey("C", "Check latest", "query upstream only", HotKeyStyle, lipgloss.NewStyle().Foreground(ColorAccent), DimText) + "\n")
-	b.WriteString(components.Hotkey("ESC", "Return to main", "", HotKeyStyle, DimText, DimText) + "\n")
+	srcPanel := components.Panel("Source", src.String(), w, PanelBorder, TitleStyle)
+
+	// ── Action strip ────────────────────────────────────────────────────────
+	actions := components.HotkeyStrip([]string{
+		components.Hotkey("F", "Fetch", "check + download", HotKeyStyle, OKText, DimText),
+		components.Hotkey("C", "Check latest", "query upstream", HotKeyStyle, AccentText, DimText),
+		components.Hotkey("ESC", "Back", "", HotKeyStyle, DimText, DimText),
+	}, MutedText)
+
+	out := banner + "\n" + statePanel + "\n" + srcPanel + "\n  " + actions + "\n"
 
 	if s.busy {
-		b.WriteString("\n  " + AccentText.Render(s.stage) + "\n")
-		b.WriteString("  " + s.prog.View() + "\n")
+		out += "\n  " + AccentText.Render(s.stage+" …") + "\n  " + s.prog.View() + "\n"
 	}
-
 	if s.app.Toast != "" {
-		st := OKText
-		if s.app.ToastErr {
-			st = ErrText
-		}
-		b.WriteString("\n" + st.Render("  "+s.app.Toast))
+		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}
-	return b.String()
+	return out
 }
 
-func srcRow(key, label string, selected bool) string {
+func srcRow(key, label string, selected bool, width int) string {
 	mark := "  "
 	if selected {
 		mark = SelText.Render(" ●")
 	}
-	return mark + " " + HotKeyStyle.Render("["+key+"]") + "  " + label
+	row := mark + " " + HotKeyStyle.Render("["+key+"]") + "  " +
+		lipgloss.NewStyle().Foreground(ColorValue).Render(label)
+	if selected {
+		row += "  " + components.Badge("active", BadgeAccent)
+	}
+	return row
 }
 
 func sourceLabel(c config.Config) string {
@@ -192,7 +193,7 @@ func sourceLabel(c config.Config) string {
 	case config.ClangZyC:
 		return "ZyC Clang  (" + c.ZyCTarget + ".x)"
 	default:
-		return "Auto: Google -> ZyC fallback"
+		return "Auto: Google → ZyC fallback"
 	}
 }
 
@@ -215,7 +216,6 @@ func sizeStr(b int64) string {
 	return fmt.Sprintf("%d MB", (b+mb-1)/mb)
 }
 
-// queryCmd resolves the latest release for the active source.
 func (s ToolchainScreen) queryCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -238,7 +238,6 @@ func (s ToolchainScreen) queryCmd() tea.Cmd {
 	}
 }
 
-// queryThenFetchCmd does query + install in one shot.
 func (s ToolchainScreen) queryThenFetchCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)

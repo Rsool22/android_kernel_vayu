@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/discover"
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/ui/components"
@@ -36,47 +35,63 @@ func (s SetupScreen) Update(msg tea.Msg) (SetupScreen, tea.Cmd) {
 }
 
 func (s SetupScreen) View() string {
-	w := s.app.Width
-	if w < 60 {
-		w = 60
+	w := clampWidth(s.app.Width, 64, 110)
+
+	banner := components.Banner(
+		"SETUP  ·  PATHS",
+		"autodiscovered, persisted in ~/.config/vayu_builder",
+		w, BannerBorder, BannerTitle, BannerSubtle,
+	)
+
+	// ── Paths panel ─────────────────────────────────────────────────────────
+	var p strings.Builder
+	rows := []struct {
+		k, v string
+		bad  bool
+	}{
+		{"Distro", string(s.app.Paths.Distro), s.app.Paths.Distro == discover.PMUnknown},
+		{"Kernel", okOr(s.app.Paths.Kernel, "(not found)"), s.app.Paths.Kernel == ""},
+		{"Clang", okOr(s.app.Paths.Clang, "(not found)"), s.app.Paths.Clang == ""},
+		{"AnyKernel3", okOr(s.app.Paths.AnyKernel, "(not found)"), s.app.Paths.AnyKernel == ""},
+		{"Output", okOr(s.app.Paths.Output, "(unset)"), s.app.Paths.Output == ""},
+		{"aarch64-gcc", okOr(s.app.Paths.GccArm64, "(not found)"), s.app.Paths.GccArm64 == ""},
+		{"arm-gcc", okOr(s.app.Paths.GccArm, "(not found)"), s.app.Paths.GccArm == ""},
 	}
-	if w > 100 {
-		w = 100
+	for i, r := range rows {
+		v := ValueStyle
+		if r.bad {
+			v = ErrText
+		}
+		p.WriteString(components.KV(r.k, r.v, 12, LabelStyle, v))
+		if i < len(rows)-1 {
+			p.WriteString("\n")
+		}
 	}
+	pathsPanel := components.Panel("Resolved paths", p.String(), w, PanelBorder, TitleStyle)
 
-	var b strings.Builder
-	b.WriteString(components.Banner("SETUP / PATHS", "autodiscovered", w, ColorTitle, ColorAccent) + "\n")
-	b.WriteString(components.Rule("", w, MutedText) + "\n\n")
-
-	statusKey := lipgloss.NewStyle().Foreground(ColorDim)
-	statusVal := lipgloss.NewStyle().Foreground(ColorAccent)
-	b.WriteString(components.KV("Distro", string(s.app.Paths.Distro), 14, statusKey, statusVal) + "\n")
-	b.WriteString(components.KV("Kernel", okOr(s.app.Paths.Kernel, "(not found)"), 14, statusKey, statusVal) + "\n")
-	b.WriteString(components.KV("Clang", okOr(s.app.Paths.Clang, "(not found)"), 14, statusKey, statusVal) + "\n")
-	b.WriteString(components.KV("AnyKernel3", okOr(s.app.Paths.AnyKernel, "(not found)"), 14, statusKey, statusVal) + "\n")
-	b.WriteString(components.KV("Output", okOr(s.app.Paths.Output, "(unset)"), 14, statusKey, statusVal) + "\n")
-	b.WriteString(components.KV("aarch64-gcc", okOr(s.app.Paths.GccArm64, "(not found)"), 14, statusKey, statusVal) + "\n")
-	b.WriteString(components.KV("arm-gcc", okOr(s.app.Paths.GccArm, "(not found)"), 14, statusKey, statusVal) + "\n\n")
-
+	// ── Install hints panel (distro-aware) ──────────────────────────────────
+	var hintsPanel string
 	if s.app.Paths.Distro != discover.PMUnknown {
-		b.WriteString(components.Rule("Install hints", w, MutedText) + "\n")
-		for _, line := range installHints(s.app.Paths) {
-			b.WriteString("  " + DimText.Render(line) + "\n")
+		var h strings.Builder
+		for i, line := range installHints(s.app.Paths) {
+			h.WriteString("  " + AccentText.Render("$ ") + ValueStyle.Render(line))
+			if i < len(installHints(s.app.Paths))-1 {
+				h.WriteString("\n")
+			}
 		}
-		b.WriteString("\n")
+		hintsPanel = components.Panel("Install hints ("+string(s.app.Paths.Distro)+")", h.String(), w, PanelBorder, TitleStyle) + "\n"
 	}
-	b.WriteString(components.Rule("Action", w, MutedText) + "\n")
-	b.WriteString(components.Hotkey("R", "Re-scan paths", "", HotKeyStyle, lipgloss.NewStyle().Foreground(ColorOK), DimText) + "\n")
-	b.WriteString(components.Hotkey("ESC", "Return to main", "", HotKeyStyle, DimText, DimText) + "\n")
 
+	actions := components.HotkeyStrip([]string{
+		components.Hotkey("R", "Re-scan", "re-run autodiscovery", HotKeyStyle, OKText, DimText),
+		components.Hotkey("ESC", "Back", "", HotKeyStyle, DimText, DimText),
+	}, MutedText)
+
+	out := banner + "\n" + pathsPanel + "\n" + hintsPanel + "  " + actions + "\n"
 	if s.app.Toast != "" {
-		st := OKText
-		if s.app.ToastErr {
-			st = ErrText
-		}
-		b.WriteString("\n" + st.Render("  "+s.app.Toast))
+		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}
-	return b.String()
+	return out
 }
 
 func installHints(p discover.Paths) []string {
