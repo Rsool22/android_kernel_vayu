@@ -219,6 +219,11 @@ func (s DepsScreen) Update(msg tea.Msg) (DepsScreen, tea.Cmd) {
 			}
 			s.app.Toast = "$ " + s.installPreview(pkgs)
 			s.app.ToastErr = false
+		case "esc", "q", "r", "b":
+			// Return to Setup wrapper menu — bash do_deps_check returns
+			// to do_setup, not to the main mode menu.
+			s.app.Screen = ScreenSetup
+			return s, nil
 		}
 	}
 	return s, nil

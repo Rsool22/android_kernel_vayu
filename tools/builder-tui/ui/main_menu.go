@@ -10,8 +10,12 @@ import (
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/ui/components"
 )
 
-// MainMenu is the entry screen. Hotkeys: B/P/T/K/F/S/D/Q. ↑/↓ + Enter also
-// navigate; Enter activates the highlighted row.
+// MainMenu is the entry screen, the strict 1:1 port of the bash
+// `run_mode_menu`. Hotkeys: B / [P] / T / M / S / Q. ↑/↓ + Enter also
+// navigate; Enter activates the highlighted row. The Features and
+// Dependencies sub-screens are reachable only inside the Build flow and the
+// Setup wrapper respectively (matching the bash structure), not from the
+// top-level menu.
 type MainMenu struct {
 	app    *App
 	cursor int
@@ -26,7 +30,7 @@ func (m MainMenu) menuActionKey(i int) string {
 	if m.app.HasImage {
 		keys = append(keys, "p")
 	}
-	keys = append(keys, "t", "k", "f", "s", "d", "q")
+	keys = append(keys, "t", "m", "s", "q")
 	if i >= 0 && i < len(keys) {
 		return keys[i]
 	}
@@ -34,7 +38,7 @@ func (m MainMenu) menuActionKey(i int) string {
 }
 
 func (m MainMenu) menuLen() int {
-	n := 7 // B + T K F S D Q
+	n := 5 // B + T M S Q
 	if m.app.HasImage {
 		n++
 	}
@@ -53,14 +57,16 @@ func (m MainMenu) Update(msg tea.Msg) (MainMenu, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		key := strings.ToLower(msg.String())
-		// Arrow-key + Enter navigation.
+		// Arrow-key + Enter navigation. j/k vim aliases were dropped here
+		// because lowercasing them collided with the M (ReSukiSU) hotkey
+		// in the bash original.
 		switch key {
-		case "up", "k":
+		case "up":
 			if m.cursor > 0 {
 				m.cursor--
 			}
 			return m, nil
-		case "down", "j":
+		case "down":
 			if m.cursor < m.menuLen()-1 {
 				m.cursor++
 			}
@@ -75,8 +81,9 @@ func (m MainMenu) Update(msg tea.Msg) (MainMenu, tea.Cmd) {
 				m.app.ToastErr = true
 				return m, nil
 			}
-			m.app.Screen = ScreenBuildOptions
-			return m, m.app.buildOpts.Init()
+			// Linear bash flow: B → Features → Build Options → do_build.
+			m.app.Screen = ScreenFeatures
+			return m, m.app.features.Init()
 		case "p":
 			// Package-only — only valid when Image already exists in out/.
 			if !m.app.HasImage {
@@ -97,18 +104,12 @@ func (m MainMenu) Update(msg tea.Msg) (MainMenu, tea.Cmd) {
 		case "t":
 			m.app.Screen = ScreenToolchain
 			return m, m.app.toolchain.Init()
-		case "k":
+		case "m":
 			m.app.Screen = ScreenKSU
 			return m, m.app.ksu.Init()
-		case "f":
-			m.app.Screen = ScreenFeatures
-			return m, m.app.features.Init()
 		case "s":
 			m.app.Screen = ScreenSetup
 			return m, m.app.setup.Init()
-		case "d":
-			m.app.Screen = ScreenDeps
-			return m, m.app.deps.Init()
 		}
 	}
 	return m, nil
@@ -170,29 +171,6 @@ func (m MainMenu) View() string {
 	}
 	prevPanel := components.Panel("Previous Build", prevBody.String(), w, PanelDim, DimText.Bold(true))
 
-	// ── Environment status panel ────────────────────────────────────────────
-	var status strings.Builder
-	rows := []struct {
-		key, val string
-		bad      bool
-	}{
-		{"Kernel", okOr(m.app.Paths.Kernel, "(not found)"), m.app.Paths.Kernel == ""},
-		{"Clang", okOr(m.app.Paths.Clang, "(not installed)"), m.app.Paths.Clang == ""},
-		{"AnyKernel3", okOr(m.app.Paths.AnyKernel, "(not found)"), m.app.Paths.AnyKernel == ""},
-		{"Distro", string(m.app.Paths.Distro), false},
-	}
-	for i, r := range rows {
-		v := ValueStyle
-		if r.bad {
-			v = ErrText
-		}
-		status.WriteString(components.KV(r.key, r.val, 11, LabelStyle, v))
-		if i < len(rows)-1 {
-			status.WriteString("\n")
-		}
-	}
-	statusPanel := components.Panel("Environment", status.String(), w, PanelBorder, TitleStyle)
-
 	// ── Menu panel ───────────────────────────────────────────────────────────
 	type menuItem struct {
 		key, label, rhs string
@@ -204,18 +182,16 @@ func (m MainMenu) View() string {
 		branchTag = "main"
 	}
 	items := []menuItem{
-		{"B", "Build kernel", "options → compile → package", ColorOK, m.pathsLocked()},
+		{"B", "Full Build", "configure → compile → package", ColorOK, m.pathsLocked()},
 	}
 	if m.app.HasImage {
-		items = append(items, menuItem{"P", "Package existing image", "skip compile", ColorOK, m.pathsLocked()})
+		items = append(items, menuItem{"P", "Package Existing Image", "skip compile", ColorOK, m.pathsLocked()})
 	}
 	items = append(items,
-		menuItem{"T", "Toolchain manager", "Google AOSP / ZyC", ColorAccent, false},
-		menuItem{"K", "ReSukiSU driver", "branch: " + branchTag, ColorWarn, false},
-		menuItem{"F", "Feature toggles", "KSU / SuSFS / KPM / menuconfig", ColorAccent, false},
-		menuItem{"S", "Setup / paths", "edit 6 path slots", ColorAccent, false},
-		menuItem{"D", "Dependency check", "host packages probe", ColorAccent, false},
-		menuItem{"Q", "Quit", "exit builder", ColorMuted, false},
+		menuItem{"T", "Toolchain Manager", "fetch/update ZyC Clang", ColorAccent, false},
+		menuItem{"M", "ReSukiSU Driver Manager", "branch: " + branchTag, ColorWarn, false},
+		menuItem{"S", "Setup", "paths + dependencies", ColorAccent, false},
+		menuItem{"Q", "Quit", "", ColorMuted, false},
 	)
 	var menu strings.Builder
 	leader := lipgloss.NewStyle().Foreground(ColorMuted)
@@ -247,7 +223,7 @@ func (m MainMenu) View() string {
 			menu.WriteString("\n")
 		}
 	}
-	menuPanel := components.Panel("Menu", menu.String(), w, PanelBorder, TitleStyle)
+	menuPanel := components.Panel("Select Mode", menu.String(), w, PanelBorder, TitleStyle)
 
 	// ── Conditional banners ──────────────────────────────────────────────────
 	var extras strings.Builder
@@ -278,14 +254,14 @@ func (m MainMenu) View() string {
 		toast = "  " + components.Toast(m.app.Toast, m.app.ToastErr) + "\n"
 	}
 
-	// Build the option string dynamically: [B/P/T/K/F/S/Q]
+	// Build the option string dynamically: [B/P/T/M/S/Q]
 	opts := []string{"B"}
 	if m.app.HasImage {
 		opts = append(opts, "P")
 	}
-	opts = append(opts, "T", "K", "F", "S", "D", "Q")
+	opts = append(opts, "T", "M", "S", "Q")
 	help := HelpStyle.Render(fmt.Sprintf(
-		"  press [%s] · esc/q to quit · terminal %dx%d",
+		"  Select [%s] · esc/q to quit · terminal %dx%d",
 		strings.Join(opts, "/"), m.app.Width, m.app.Height,
 	))
 
@@ -295,7 +271,6 @@ func (m MainMenu) View() string {
 	divider := components.Separator(w, MutedText) + "\n"
 	return banner + "\n" +
 		prevPanel + "\n" +
-		statusPanel + "\n" +
 		menuPanel + "\n" +
 		extras.String() +
 		divider +

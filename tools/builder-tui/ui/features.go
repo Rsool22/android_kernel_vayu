@@ -125,6 +125,20 @@ func (s FeaturesScreen) Update(msg tea.Msg) (FeaturesScreen, tea.Cmd) {
 			s.app.ToastErr = false
 		case "m":
 			return s, s.runMenuconfig()
+		case "c":
+			// Confirm & Continue — strict 1:1 port of bash run_feat_menu's
+			// `c` action. Drives the linear flow Features → Build Options
+			// → do_build.
+			s.app.Screen = ScreenBuildOptions
+			return s, s.app.buildOpts.Init()
+		case "b":
+			// Back to Mode Select — bash original returns to mode menu.
+			s.app.Screen = ScreenMain
+			return s, nil
+		case "q":
+			// In bash this quits the whole script; preserve the same
+			// shortcut here.
+			return s, tea.Quit
 		}
 	case menuconfigDoneMsg:
 		s.handleMenuconfigDone(m)
@@ -309,8 +323,10 @@ func (s FeaturesScreen) View() string {
 		{Key: "2", Desc: "SuSFS", Sub: "toggle"},
 		{Key: "3", Desc: "KPM", Sub: "toggle"},
 		{Key: "M", Desc: "Menuconfig", Sub: "interactive"},
+		{Key: "C", Desc: "Confirm & Continue"},
+		{Key: "B", Desc: "Back to Mode Select"},
 		{Key: "R", Desc: "Reload"},
-		{Key: "ESC", Desc: "Back"},
+		{Key: "Q", Desc: "Quit"},
 	}, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
 
 	divider := components.Separator(w, MutedText) + "\n"
