@@ -154,8 +154,33 @@ func MenuRow(key, label, rhs string, width, keyWidth int, keyStyle, labelStyle, 
 		// rhs would overflow; drop it cleanly rather than wrap mid-row.
 		return prefix
 	}
-	leader := leaderStyle.Render(" " + strings.Repeat("·", pad-2) + " ")
-	return prefix + leader + rhsStyle.Render(rhs)
+	return prefix + DotLeader(pad, leaderStyle) + rhsStyle.Render(rhs)
+}
+
+// DotLeader returns ` ··· ` (with one space on each side) of exactly
+// `width` columns, styled with `style`. Used by MenuRow and any
+// caller that wants the same dot-fill between label and right value.
+//
+// Safe for narrow terminals: falls back to plain spaces (or empty)
+// when width is too small to fit ` · ` so it never panics on a
+// negative `strings.Repeat` count.
+func DotLeader(width int, style lipgloss.Style) string {
+	if width <= 0 {
+		return ""
+	}
+	if width < 3 {
+		return strings.Repeat(" ", width)
+	}
+	return style.Render(" " + strings.Repeat("·", width-2) + " ")
+}
+
+// SafeRepeat is strings.Repeat clamped to non-negative counts. Returns
+// "" for n <= 0 instead of panicking like the stdlib does.
+func SafeRepeat(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.Repeat(s, n)
 }
 
 // Hotkey describes one entry in a footer action strip.

@@ -316,12 +316,11 @@ func srcRow(key, label string, selected, hovered bool, width int) string {
 	if rhs == "" {
 		return prefix
 	}
-	pad := width - lipgloss.Width(prefix) - lipgloss.Width(rhs) - 2
-	if pad < 1 {
+	pad := width - lipgloss.Width(prefix) - lipgloss.Width(rhs)
+	if pad < 3 {
 		return prefix + "  " + rhs
 	}
-	leader := MutedText.Render(" " + strings.Repeat("·", pad-2) + " ")
-	return prefix + leader + rhs
+	return prefix + components.DotLeader(pad, MutedText) + rhs
 }
 
 func sourceLabel(c config.Config) string {

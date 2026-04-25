@@ -255,12 +255,8 @@ func buildOptRowStyled(key, label, value string, valStyle lipgloss.Style, width 
 	tag := components.BracketTag(key, 1, HotKeyStyle)
 	prefix := tag + "  " + ValueStyle.Render(label)
 	rhs := valStyle.Render(value)
-	pad := width - lipgloss.Width(prefix) - lipgloss.Width(rhs) - 2
-	if pad < 1 {
-		pad = 1
-	}
-	leader := MutedText.Render(" " + strings.Repeat("·", pad-2) + " ")
-	return prefix + leader + rhs
+	pad := width - lipgloss.Width(prefix) - lipgloss.Width(rhs)
+	return prefix + components.DotLeader(pad, MutedText) + rhs
 }
 
 func knameValue(v string) string {

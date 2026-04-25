@@ -183,12 +183,14 @@ func wrapPlainPaths(s string, width int) []string {
 	return lines
 }
 
-// padRight right-pads s to the given visual width with spaces.
+// padRight right-pads s to the given visual width with spaces. Safe
+// when s is already wider than width (returns s unchanged) and never
+// panics on a negative repeat count.
 func padRight(s string, width int) string {
-	if len(s) >= width {
+	if lipgloss.Width(s) >= width {
 		return s
 	}
-	return s + strings.Repeat(" ", width-len(s))
+	return s + components.SafeRepeat(" ", width-lipgloss.Width(s))
 }
 
 // defaultOr returns d when d is non-empty, otherwise alt. Used to surface

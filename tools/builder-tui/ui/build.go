@@ -465,12 +465,8 @@ func stageRow(sv stageView, spinFrame string, width int) string {
 	if sv.Detail != "" {
 		rhs += "  " + DimText.Render(sv.Detail)
 	}
-	pad := width - lipgloss.Width(prefix) - lipgloss.Width(rhs) - 2
-	if pad < 1 {
-		pad = 1
-	}
-	leader := MutedText.Render(" " + strings.Repeat("·", pad-2) + " ")
-	return prefix + leader + rhs
+	pad := width - lipgloss.Width(prefix) - lipgloss.Width(rhs)
+	return prefix + components.DotLeader(pad, MutedText) + rhs
 }
 
 // renderResultPanel renders ASCII art + summary panel after the pipeline

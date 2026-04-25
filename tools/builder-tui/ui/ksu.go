@@ -326,10 +326,10 @@ func itoa(i int) string {
 
 // padTo right-pads a string with spaces to a fixed visible width.
 func padTo(s string, w int) string {
-	if len(s) >= w {
+	if lipgloss.Width(s) >= w {
 		return s
 	}
-	return s + strings.Repeat(" ", w-len(s))
+	return s + components.SafeRepeat(" ", w-lipgloss.Width(s))
 }
 
 // probeRow renders a single branch probe row with all columns aligned
@@ -348,7 +348,7 @@ func probeRow(branch string, branchW int, p resukisu.Probe, probed bool) string 
 	const badgeW = 7
 	b := strings.TrimSpace(branch)
 	tag := components.BracketTag(b, len(b), HotKeyStyle)
-	tagPad := strings.Repeat(" ", branchW-len(b))
+	tagPad := components.SafeRepeat(" ", branchW-len(b))
 	prefix := "  " + tag + tagPad + "  "
 	if !probed {
 		return prefix + DimText.Render("(probing …)")
