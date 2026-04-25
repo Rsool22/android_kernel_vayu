@@ -38,14 +38,26 @@ power users perform individual actions headlessly:
 			fmt.Fprintln(os.Stderr, "warning: load config:", err)
 			cfg = config.Defaults()
 		}
-		switch rootStyle {
+		// Resolve the active style: --style flag wins, else persisted
+		// config theme, else "bash". Then apply the persisted accent
+		// override so the saved colour preference survives a restart.
+		theme := rootStyle
+		if theme == "" {
+			theme = cfg.Theme
+		}
+		switch theme {
 		case "modern":
 			ui.ApplyStyle(ui.StyleModern)
+		case "mono":
+			ui.ApplyStyle(ui.StyleMono)
 		case "", "bash":
 			ui.ApplyStyle(ui.StyleBash)
 		default:
-			fmt.Fprintf(os.Stderr, "warning: unknown --style %q (using bash)\n", rootStyle)
+			fmt.Fprintf(os.Stderr, "warning: unknown --style %q (using bash)\n", theme)
 			ui.ApplyStyle(ui.StyleBash)
+		}
+		if cfg.AccentColor != "" {
+			ui.ApplyAccentOverride(cfg.AccentColor)
 		}
 		app := ui.NewApp(cfg)
 		p := tea.NewProgram(app, tea.WithAltScreen())
@@ -64,8 +76,8 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&rootStyle, "style", "bash",
-		"visual variant: bash (double-line, magenta/cyan/yellow) | modern (rounded, soft palette)")
+	rootCmd.PersistentFlags().StringVar(&rootStyle, "style", "",
+		"visual variant: bash (double-line, magenta/cyan/yellow) | modern (rounded, soft palette) | mono (single colour). Empty falls back to the persisted theme setting.")
 	rootCmd.AddCommand(buildCmd, fetchClangCmd, probeCmd, pathsCmd, versionCmd)
 }
 

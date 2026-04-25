@@ -251,10 +251,11 @@ func (s KSUScreen) View() string {
 
 	// ── Upstream branch states ──────────────────────────────────────────────
 	// Right-pad branch label to the widest value so badges align in a column.
-	branchW := 4 // max(len("main"), len("dev"))
+	branchW := components.GlobalKeyWidth // shares the global bracket column with [main]/[dev]
+	innerW := innerContentWidth(w)
 	var ups strings.Builder
-	ups.WriteString(probeRow("main", branchW, s.main, s.probed) + "\n")
-	ups.WriteString(probeRow("dev", branchW, s.dev, s.probed))
+	ups.WriteString(probeRow("main", branchW, s.main, s.probed, innerW, s.app.Cfg.KSUBranch == "main") + "\n")
+	ups.WriteString(probeRow("dev", branchW, s.dev, s.probed, innerW, s.app.Cfg.KSUBranch == "dev"))
 	upsPanel := components.Panel("Upstream branches", ups.String(), w, PanelBorder, TitleStyle)
 
 	// ── Action strip ────────────────────────────────────────────────────────
@@ -319,35 +320,42 @@ func padTo(s string, w int) string {
 // probeRow renders a single branch probe row with all columns aligned
 // regardless of branch label or status length:
 //
-//	  [main]  PRESENT  HEAD@7adffacb
-//	  [dev ]  ABSENT   branch removed upstream
-//	  [foo ]  NETWORK  could not reach upstream
+//	▸ [main]  PRESENT  ····························· HEAD@7adffacb
+//	  [dev ]  ABSENT   ······· branch removed upstream
+//	  [foo ]  NETWORK  ······· could not reach upstream
 //
-// branchW is the widest branch label across all rows (used for [..] padding);
-// badge text is padded to 7 chars (max of "present"/"absent"/"network").
-func probeRow(branch string, branchW int, p resukisu.Probe, probed bool) string {
+// branchW pads the bracketed branch label to a fixed width (shared
+// global so [main]/[dev]/[ESC] all close at the same column). The
+// badge column is padded to 7 chars (max of "present"/"absent"/"network").
+// active=true draws a navigation chevron in the left gutter so the
+// currently selected branch is visually distinct from the bullet styles
+// used elsewhere.
+func probeRow(branch string, branchW int, p resukisu.Probe, probed bool, width int, active bool) string {
 	const badgeW = 7
 	tag := components.BracketTag(strings.TrimSpace(branch), branchW, HotKeyStyle)
+	arrow := components.NavArrow(active, SelText)
+	left := arrow + tag + "  "
 	if !probed {
-		return "  " + tag + "  " + DimText.Render("(probing …)")
+		prefix := left + components.Badge(padTo("PROBE", badgeW), BadgeAccent)
+		return components.LeaderRow(prefix, DimText.Render("(probing …)"), width, MutedText)
 	}
+	var badge, detail string
 	switch p.State {
 	case resukisu.StatePresent:
 		short := p.SHA
 		if len(short) > 8 {
 			short = short[:8]
 		}
-		return "  " + tag + "  " +
-			components.Badge(padTo("PRESENT", badgeW), BadgeOK) + "  " +
-			DimText.Render("HEAD@") + AccentText.Bold(true).Render(short)
+		badge = components.Badge(padTo("PRESENT", badgeW), BadgeOK)
+		detail = DimText.Render("HEAD@") + AccentText.Bold(true).Render(short)
 	case resukisu.StateAbsent:
-		return "  " + tag + "  " +
-			components.Badge(padTo("ABSENT", badgeW), BadgeWarn) + "  " +
-			DimText.Render("branch removed or merged upstream")
+		badge = components.Badge(padTo("ABSENT", badgeW), BadgeWarn)
+		detail = DimText.Render("branch removed or merged upstream")
 	case resukisu.StateNetworkFail:
-		return "  " + tag + "  " +
-			components.Badge(padTo("NETWORK", badgeW), BadgeErr) + "  " +
-			DimText.Render("could not reach upstream — check connection")
+		badge = components.Badge(padTo("NETWORK", badgeW), BadgeErr)
+		detail = DimText.Render("could not reach upstream — check connection")
+	default:
+		return ""
 	}
-	return ""
+	return components.LeaderRow(left+badge, detail, width, MutedText)
 }

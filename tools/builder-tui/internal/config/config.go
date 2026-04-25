@@ -48,6 +48,16 @@ type Config struct {
 
 	// KSUBranch is the active ReSukiSU branch ("main" or "dev").
 	KSUBranch string
+
+	// Theme controls the visual style of the TUI. Recognised values:
+	// "bash" (default, double-line magenta/cyan), "modern" (rounded soft
+	// palette), "mono" (single-colour, terminal-default for low-colour
+	// terminals).
+	Theme string
+	// AccentColor overrides the hot-key / accent colour. Format is a
+	// 256-colour ANSI index (e.g. "214") or hex string (e.g. "#5fafff").
+	// Empty means "use the theme default".
+	AccentColor string
 }
 
 // Defaults returns a sensible starting Config.
@@ -57,6 +67,8 @@ func Defaults() Config {
 		ZyCTarget:    "latest",
 		GoogleTarget: "latest",
 		KSUBranch:    "main",
+		Theme:        "bash",
+		AccentColor:  "",
 	}
 }
 
@@ -128,6 +140,10 @@ func Load() (Config, error) {
 			c.GoogleTarget = v
 		case "ksu_branch":
 			c.KSUBranch = v
+		case "theme":
+			c.Theme = v
+		case "accent_color":
+			c.AccentColor = v
 		}
 	}
 	if err := s.Err(); err != nil {
@@ -169,6 +185,8 @@ func (c Config) Save() error {
 	writeOpt("zyc_target", c.ZyCTarget)
 	writeOpt("google_target", c.GoogleTarget)
 	writeOpt("ksu_branch", c.KSUBranch)
+	writeOpt("theme", c.Theme)
+	writeOpt("accent_color", c.AccentColor)
 	if err := w.Flush(); err != nil {
 		f.Close()
 		return err
@@ -193,5 +211,10 @@ func (c *Config) normalize() {
 	}
 	if c.KSUBranch != "main" && c.KSUBranch != "dev" {
 		c.KSUBranch = "main"
+	}
+	switch c.Theme {
+	case "bash", "modern", "mono":
+	default:
+		c.Theme = "bash"
 	}
 }

@@ -113,11 +113,24 @@ func (s BuildScreen) Update(msg tea.Msg) (BuildScreen, tea.Cmd) {
 			}
 		}
 	case compileLineMsg:
-		s.lines = append(s.lines, m.line)
+		// Normalise the streamed line so the viewport never paints with
+		// stray CRs or trailing whitespace, and never starts with a run
+		// of blank lines (which previously left a visible newline at the
+		// top of the log box before the first real output arrived).
+		line := strings.TrimRight(m.line, "\r \t")
+		if len(s.lines) == 0 && strings.TrimSpace(line) == "" {
+			break
+		}
+		s.lines = append(s.lines, line)
 		if len(s.lines) > 5000 {
 			s.lines = s.lines[len(s.lines)-5000:]
 		}
-		s.vp.SetContent(strings.Join(s.lines, "\n"))
+		// Trim trailing blank lines off the rendered content so the
+		// viewport's bottom hugs the latest real output (also drops the
+		// "duplicated date+output at end of script" gap the user saw on
+		// finished pipelines).
+		content := strings.TrimRight(strings.Join(s.lines, "\n"), " \n\t")
+		s.vp.SetContent(content)
 		s.vp.GotoBottom()
 	case pipelineDoneMsg:
 		s.running = false
@@ -463,7 +476,7 @@ func stageRow(sv stageView, spinFrame string, width int) string {
 	default:
 		badge = MutedText.Render("…")
 	}
-	tag := components.BracketTag(num, 1, HotKeyStyle)
+	tag := components.GlobalBracketTag(num, HotKeyStyle)
 	prefix := tag + "  " + ValueStyle.Render(padTo(name, 10))
 	rhs := badge
 	if sv.Detail != "" {
@@ -473,8 +486,7 @@ func stageRow(sv stageView, spinFrame string, width int) string {
 	if pad < 1 {
 		pad = 1
 	}
-	leader := MutedText.Render(" " + strings.Repeat("·", pad-2) + " ")
-	return prefix + leader + rhs
+	return prefix + components.Leader(pad, MutedText) + rhs
 }
 
 // renderResultPanel renders ASCII art + summary panel after the pipeline

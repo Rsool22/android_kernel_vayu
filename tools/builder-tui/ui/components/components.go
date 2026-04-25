@@ -12,6 +12,47 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// GlobalKeyWidth is the maximum bracketed-key label width across every
+// screen in the TUI. All [X] / [ESC] / [main] tags are padded to this
+// width so closing brackets line up in the same column regardless of
+// which page the user is on. Computed once at package init from a
+// curated list of the keys actually rendered by the screens.
+var GlobalKeyWidth = computeGlobalKeyWidth()
+
+func computeGlobalKeyWidth() int {
+	// Keys used across every screen + the longest branch labels. Keep this
+	// list in sync when adding new hotkeys; it is intentionally a static
+	// list rather than computed at runtime so screens render identically
+	// before any data is loaded.
+	known := []string{
+		"B", "P", "T", "K", "F", "S", "D", "Q",
+		"N", "I", "C", "X", "R", "E", "V", "M",
+		"A", "G", "Z", "L",
+		"1", "2", "3", "4", "5", "6",
+		"main", "dev",
+		"ESC", "Enter", "Ctrl+C", "↑/↓", "1-6",
+	}
+	w := 1
+	for _, k := range known {
+		if lipgloss.Width(k) > w {
+			w = lipgloss.Width(k)
+		}
+	}
+	return w
+}
+
+// Leader returns a dotted leader of `n` dots wrapped in single-space
+// gutters, e.g. ` ··········· `. Returns just the gutters (no dots) when
+// the available pad is too small. Always safe -- never panics on small
+// or negative input. style is applied to the entire leader.
+func Leader(pad int, style lipgloss.Style) string {
+	n := pad - 2
+	if n < 0 {
+		n = 0
+	}
+	return style.Render(" " + strings.Repeat("·", n) + " ")
+}
+
 // Banner renders the magenta double-bordered title banner that opens every
 // screen. The visual is modeled on the bash TUI's:
 //
@@ -73,11 +114,33 @@ func KV(key, value string, keyWidth int, keyStyle, valStyle lipgloss.Style) stri
 //
 // regardless of inner text length.
 func BracketTag(label string, maxLabelWidth int, style lipgloss.Style) string {
-	if maxLabelWidth < len(label) {
-		maxLabelWidth = len(label)
+	if maxLabelWidth < lipgloss.Width(label) {
+		maxLabelWidth = lipgloss.Width(label)
 	}
-	inner := label + strings.Repeat(" ", maxLabelWidth-len(label))
+	pad := maxLabelWidth - lipgloss.Width(label)
+	if pad < 0 {
+		pad = 0
+	}
+	inner := label + strings.Repeat(" ", pad)
 	return style.Render("[" + inner + "]")
+}
+
+// GlobalBracketTag renders BracketTag using GlobalKeyWidth so the closing
+// `]` aligns to the same column on every screen of the TUI.
+func GlobalBracketTag(label string, style lipgloss.Style) string {
+	return BracketTag(label, GlobalKeyWidth, style)
+}
+
+// NavArrow returns a single-glyph navigation chevron. Selected items get a
+// solid right-pointing arrow; unselected items get a thin spacer that takes
+// the same width so columns line up. Used by source/branch/feature menus
+// so the active option is unambiguous (the previous bullet `●` was easy
+// to mistake for a list marker).
+func NavArrow(selected bool, style lipgloss.Style) string {
+	if selected {
+		return style.Render("▸ ")
+	}
+	return "  "
 }
 
 // MenuRow renders a hotkey-style menu line that fills available width:
@@ -94,8 +157,50 @@ func MenuRow(key, label, rhs string, width, keyWidth int, keyStyle, labelStyle, 
 	if pad < 1 {
 		pad = 1
 	}
-	leader := leaderStyle.Render(" " + strings.Repeat("·", pad-2) + " ")
-	return prefix + leader + rhsStyle.Render(rhs)
+	return prefix + Leader(pad, leaderStyle) + rhsStyle.Render(rhs)
+}
+
+// LeaderRow renders an arbitrary `prefix .......... rhs` row, computing
+// the dotted leader so prefix's left edge and rhs's right edge meet the
+// available width. Both prefix and rhs must already be styled by the
+// caller; the leader is styled with leaderStyle. Safe for any width and
+// any prefix/rhs visible widths -- never panics.
+func LeaderRow(prefix, rhs string, width int, leaderStyle lipgloss.Style) string {
+	rendered := lipgloss.Width(prefix) + lipgloss.Width(rhs) + 2
+	pad := width - rendered
+	if pad < 1 {
+		pad = 1
+	}
+	return prefix + Leader(pad, leaderStyle) + rhs
+}
+
+// Notice renders a single-line, panel-titled informational note. Used
+// for [i] info / [!] warning / [×] error banners that mirror the bash
+// build script's coloured tip lines:
+//
+//	╔══════════════════════════ NOTE ════════════════════════════════════╗
+//	║   [i]  Stash your local edits before switching branches            ║
+//	╚══════════════════════════════════════════════════════════════════════╝
+func Notice(level, msg string, width int, border lipgloss.Style, titleStyle, bodyStyle lipgloss.Style) string {
+	inner := width - 4
+	if inner < 12 {
+		inner = 12
+	}
+	prefix := "[i]"
+	title := "NOTE"
+	switch strings.ToLower(level) {
+	case "warn", "warning":
+		prefix = "[!]"
+		title = "WARNING"
+	case "err", "error":
+		prefix = "[\u00d7]"
+		title = "ERROR"
+	case "ok", "success":
+		prefix = "[\u2713]"
+		title = "OK"
+	}
+	body := bodyStyle.Render(prefix+" ") + bodyStyle.Render(msg)
+	return Panel(title, body, width, border, titleStyle)
 }
 
 // Hotkey describes one entry in a footer action strip.

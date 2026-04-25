@@ -16,13 +16,16 @@ import (
 )
 
 // ToolchainScreen lets the user pick Google/ZyC/Auto, query upstream, and
-// fetch+install a clang toolchain.
+// fetch+install a clang toolchain. It also shows the local clang library
+// inventory and lets the user switch between installed versions.
 type ToolchainScreen struct {
-	app   *App
-	prog  progress.Model
-	busy  bool
-	stage string
-	last  string
+	app       *App
+	prog      progress.Model
+	busy      bool
+	stage     string
+	last      string
+	inventory []clang.Entry
+	invCursor int
 }
 
 func NewToolchainScreen(a *App) ToolchainScreen {
@@ -31,7 +34,9 @@ func NewToolchainScreen(a *App) ToolchainScreen {
 	return ToolchainScreen{app: a, prog: p}
 }
 
-func (s ToolchainScreen) Init() tea.Cmd { return nil }
+func (s ToolchainScreen) Init() tea.Cmd {
+	return func() tea.Msg { return tcInventoryRefreshMsg{} }
+}
 
 // Messages used by the toolchain screen.
 type tcQueryDoneMsg struct {
@@ -40,6 +45,7 @@ type tcQueryDoneMsg struct {
 }
 type tcDownloadProgressMsg struct{ done, total int64 }
 type tcInstallDoneMsg struct{ err error }
+type tcInventoryRefreshMsg struct{}
 
 func (s ToolchainScreen) Update(msg tea.Msg) (ToolchainScreen, tea.Cmd) {
 	switch m := msg.(type) {
@@ -78,6 +84,36 @@ func (s ToolchainScreen) Update(msg tea.Msg) (ToolchainScreen, tea.Cmd) {
 			s.busy = true
 			s.stage = "querying upstream"
 			return s, s.queryThenFetchCmd()
+		case "n":
+			if len(s.inventory) > 0 {
+				s.invCursor = (s.invCursor + 1) % len(s.inventory)
+			}
+		case "x":
+			if len(s.inventory) > 0 {
+				tgt := s.inventory[s.invCursor]
+				lib := clang.LibraryDir(s.app.Paths.Clang)
+				if err := clang.MakeActive(lib, tgt.Dir); err != nil {
+					s.app.Toast = "Switch failed: " + err.Error()
+					s.app.ToastErr = true
+				} else {
+					s.app.Toast = "Active clang \u2192 " + tgt.Tag
+					s.app.ToastErr = false
+				}
+				s = s.refreshInventory()
+			}
+		case "r":
+			if len(s.inventory) > 0 {
+				tgt := s.inventory[s.invCursor]
+				lib := clang.LibraryDir(s.app.Paths.Clang)
+				if err := clang.Remove(lib, tgt.Dir); err != nil {
+					s.app.Toast = "Remove failed: " + err.Error()
+					s.app.ToastErr = true
+				} else {
+					s.app.Toast = "Removed " + tgt.Tag
+					s.app.ToastErr = false
+				}
+				s = s.refreshInventory()
+			}
 		}
 	case tcQueryDoneMsg:
 		s.busy = false
@@ -108,6 +144,10 @@ func (s ToolchainScreen) Update(msg tea.Msg) (ToolchainScreen, tea.Cmd) {
 			s.app.Toast = "Clang installed at " + s.app.Paths.Clang
 			s.app.ToastErr = false
 		}
+		s = s.refreshInventory()
+		return s, nil
+	case tcInventoryRefreshMsg:
+		s = s.refreshInventory()
 		return s, nil
 	case progress.FrameMsg:
 		var cmd tea.Cmd
@@ -162,13 +202,20 @@ func (s ToolchainScreen) View() string {
 
 	// ── Action strip ────────────────────────────────────────────────────────
 	actions := components.HotkeyStrip([]components.Hotkey{
-		{Key: "F", Desc: "Fetch", Sub: "check + download"},
+		{Key: "F", Desc: "Fetch", Sub: "versioned install"},
 		{Key: "C", Desc: "Check latest", Sub: "query upstream"},
+		{Key: "N", Desc: "Next", Sub: "cycle inventory"},
+		{Key: "X", Desc: "Switch", Sub: "activate selected"},
+		{Key: "R", Desc: "Remove", Sub: "delete selected"},
 		{Key: "ESC", Desc: "Back"},
 	}, HotKeyStyle, ValueStyle, DimText, MutedText)
 
+	// Inventory panel: lists installed clang versions side-by-side
+	// with the active one and allows the user to switch.
+	invPanel := s.renderInventoryPanel(w, innerW)
+
 	divider := "  " + components.Separator(innerContentWidth(w), MutedText) + "\n"
-	out := banner + "\n" + statePanel + "\n" + srcPanel + "\n" + divider + "  " + actions + "\n"
+	out := banner + "\n" + statePanel + "\n" + srcPanel + "\n" + invPanel + "\n" + divider + "  " + actions + "\n"
 
 	if s.busy {
 		out += "\n  " + AccentText.Render(s.stage+" …") + "\n  " + s.prog.View() + "\n"
@@ -179,20 +226,23 @@ func (s ToolchainScreen) View() string {
 	return out
 }
 
-// srcRow renders one source-selector row with [key] right-padded so all
-// closing brackets align in a column even when keys are mixed letters/digits.
+// srcRow renders one source-selector row with a navigation chevron in
+// the left gutter for the active selection, [key] right-padded to the
+// global bracket column so closing brackets align across pages, and a
+// dotted leader pulling the ACTIVE badge to the right edge of the panel.
+//
+//	▸ [A]  Auto: Google primary, ZyC fallback ················· ACTIVE
+//	  [G]  Google AOSP clang (android.googlesource.com)
+//	  [Z]  ZyC Clang (community / GitHub releases)
 func srcRow(key, label string, selected bool, width int) string {
-	mark := "  "
-	if selected {
-		mark = SelText.Render(" ●")
-	}
-	tag := components.BracketTag(key, 1, HotKeyStyle)
-	row := mark + " " + tag + "  " +
+	arrow := components.NavArrow(selected, SelText)
+	tag := components.GlobalBracketTag(key, HotKeyStyle)
+	prefix := arrow + tag + "  " +
 		lipgloss.NewStyle().Foreground(ColorValue).Render(label)
 	if selected {
-		row += "  " + components.Badge("ACTIVE", BadgeAccent)
+		return components.LeaderRow(prefix, components.Badge("ACTIVE", BadgeAccent), width, MutedText)
 	}
-	return row
+	return prefix
 }
 
 func sourceLabel(c config.Config) string {
@@ -288,7 +338,87 @@ func (s ToolchainScreen) queryThenFetchCmd() tea.Cmd {
 			lastSent = time.Now()
 			Program.Send(tcDownloadProgressMsg{done: done, total: total})
 		})
-		err = clang.Install(ctx, rel, dest, cb)
-		return tcInstallDoneMsg{err: err}
+		// Multi-version install: drop the new build into a versioned
+		// inventory directory next to the active slot, then atomically
+		// flip the active symlink. This means the previous version is
+		// still on disk (visible in the [N]ext list) and the user can
+		// roll back at any time.
+		lib := clang.LibraryDir(dest)
+		if lib == "" {
+			err = clang.Install(ctx, rel, dest, cb)
+			return tcInstallDoneMsg{err: err}
+		}
+		installed, err := clang.InstallVersioned(ctx, rel, lib, cb)
+		if err != nil {
+			return tcInstallDoneMsg{err: err}
+		}
+		if err := clang.MakeActive(lib, installed); err != nil {
+			return tcInstallDoneMsg{err: fmt.Errorf("activate %s: %w", installed, err)}
+		}
+		return tcInstallDoneMsg{}
 	}
+}
+
+// refreshInventory rescans the library directory next to Paths.Clang
+// and returns a new screen value with the updated inventory list.
+func (s ToolchainScreen) refreshInventory() ToolchainScreen {
+	lib := clang.LibraryDir(s.app.Paths.Clang)
+	if lib == "" {
+		s.inventory = nil
+		s.invCursor = 0
+		return s
+	}
+	inv, err := clang.Inventory(lib, s.app.Paths.Clang)
+	if err != nil {
+		s.inventory = nil
+		s.invCursor = 0
+		return s
+	}
+	s.inventory = inv
+	if s.invCursor >= len(inv) {
+		s.invCursor = 0
+	}
+	return s
+}
+
+// renderInventoryPanel paints the local clang library list. When the
+// library directory is empty or unset, it renders a friendly empty-state
+// notice instead.
+func (s ToolchainScreen) renderInventoryPanel(w, innerW int) string {
+	lib := clang.LibraryDir(s.app.Paths.Clang)
+	if lib == "" {
+		body := DimText.Render("(set Setup → Clang path first)")
+		return components.Panel("Library", body, w, PanelDim, TitleStyle.Foreground(ColorDim))
+	}
+	if len(s.inventory) == 0 {
+		body := DimText.Render("No additional clang versions installed.\n" +
+			"Use [F] to fetch a new version — it will be saved alongside the active install.")
+		return components.Panel("Library  ·  "+lib, body, w, PanelDim, TitleStyle.Foreground(ColorDim))
+	}
+	var b strings.Builder
+	for i, e := range s.inventory {
+		b.WriteString(invRow(i == s.invCursor, e, innerW))
+		if i < len(s.inventory)-1 {
+			b.WriteString("\n")
+		}
+	}
+	return components.Panel("Library  ·  "+lib, b.String(), w, PanelBorder, TitleStyle)
+}
+
+// invRow renders one library entry: ▸ tag · source ·········· ACTIVE
+func invRow(cursor bool, e clang.Entry, width int) string {
+	arrow := components.NavArrow(cursor, SelText)
+	srcLabel := e.Source
+	if srcLabel == "" {
+		srcLabel = "unknown"
+	}
+	prefix := arrow + ValueStyle.Render(e.Tag) + "  " +
+		DimText.Render("("+srcLabel+")")
+	var rhs string
+	if e.Active {
+		rhs = components.Badge("ACTIVE", BadgeOK)
+	} else {
+		rhs = DimText.Render("idle")
+	}
+	return components.LeaderRow(prefix, rhs, width, MutedText)
 }

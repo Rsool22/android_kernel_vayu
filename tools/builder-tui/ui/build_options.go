@@ -245,15 +245,14 @@ func buildOptRow(key, label, value string, width int) string {
 
 // buildOptRowStyled is buildOptRow with explicit value style.
 func buildOptRowStyled(key, label, value string, valStyle lipgloss.Style, width int) string {
-	tag := components.BracketTag(key, 1, HotKeyStyle)
+	tag := components.GlobalBracketTag(key, HotKeyStyle)
 	prefix := tag + "  " + ValueStyle.Render(label)
 	rhs := valStyle.Render(value)
 	pad := width - lipgloss.Width(prefix) - lipgloss.Width(rhs) - 2
 	if pad < 1 {
 		pad = 1
 	}
-	leader := MutedText.Render(" " + strings.Repeat("·", pad-2) + " ")
-	return prefix + leader + rhs
+	return prefix + components.Leader(pad, MutedText) + rhs
 }
 
 func knameValue(v string) string {

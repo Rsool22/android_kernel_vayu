@@ -69,6 +69,9 @@ func (m MainMenu) Update(msg tea.Msg) (MainMenu, tea.Cmd) {
 		case "d":
 			m.app.Screen = ScreenDeps
 			return m, m.app.deps.Init()
+		case "v":
+			m.app.Screen = ScreenSettings
+			return m, m.app.settings.Init()
 		}
 	}
 	return m, nil
@@ -175,16 +178,12 @@ func (m MainMenu) View() string {
 		menuItem{"F", "Feature toggles", "KSU / SuSFS / KPM / menuconfig", ColorAccent, false},
 		menuItem{"S", "Setup / paths", "edit 6 path slots", ColorAccent, false},
 		menuItem{"D", "Dependency check", "host packages probe", ColorAccent, false},
+		menuItem{"V", "Visuals / theme", "colours, accent, style", ColorAccent, false},
 		menuItem{"Q", "Quit", "exit builder", ColorMuted, false},
 	)
 	var menu strings.Builder
 	leader := lipgloss.NewStyle().Foreground(ColorMuted)
-	maxKey := 0
-	for _, it := range items {
-		if len(it.key) > maxKey {
-			maxKey = len(it.key)
-		}
-	}
+	maxKey := components.GlobalKeyWidth
 	for i, it := range items {
 		labelStyle := lipgloss.NewStyle().Foreground(ColorValue).Bold(true)
 		rhs := it.rhs
@@ -238,7 +237,7 @@ func (m MainMenu) View() string {
 	if m.app.HasImage {
 		opts = append(opts, "P")
 	}
-	opts = append(opts, "T", "K", "F", "S", "D", "Q")
+	opts = append(opts, "T", "K", "F", "S", "D", "V", "Q")
 	help := HelpStyle.Render(fmt.Sprintf(
 		"  press [%s] · esc/q to quit · terminal %dx%d",
 		strings.Join(opts, "/"), m.app.Width, m.app.Height,

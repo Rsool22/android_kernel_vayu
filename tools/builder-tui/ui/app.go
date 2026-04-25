@@ -24,6 +24,7 @@ const (
 	ScreenFeatures
 	ScreenBuildOptions
 	ScreenDeps
+	ScreenSettings
 )
 
 // Program is set by the entrypoint (cmd.Execute) once tea.NewProgram returns,
@@ -71,6 +72,7 @@ type App struct {
 	features   FeaturesScreen
 	buildOpts  BuildOptionsScreen
 	deps       DepsScreen
+	settings   SettingsScreen
 }
 
 // NewApp constructs the root app and pre-runs path autodiscovery.
@@ -92,6 +94,7 @@ func NewApp(cfg config.Config) *App {
 	a.features = NewFeaturesScreen(a)
 	a.buildOpts = NewBuildOptionsScreen(a)
 	a.deps = NewDepsScreen(a)
+	a.settings = NewSettingsScreen(a)
 	return a
 }
 
@@ -133,6 +136,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.buildOpts, cmd = a.buildOpts.Update(msg)
 		cmds = append(cmds, cmd)
 		a.deps, cmd = a.deps.Update(msg)
+		cmds = append(cmds, cmd)
+		a.settings, cmd = a.settings.Update(msg)
 		cmds = append(cmds, cmd)
 		return a, tea.Batch(cmds...)
 	case tea.KeyMsg:
@@ -185,6 +190,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.deps, cmd = a.deps.Update(msg)
 		return a, cmd
+	case ScreenSettings:
+		var cmd tea.Cmd
+		a.settings, cmd = a.settings.Update(msg)
+		return a, cmd
 	}
 	return a, nil
 }
@@ -206,6 +215,8 @@ func (a *App) View() string {
 		return a.buildOpts.View()
 	case ScreenDeps:
 		return a.deps.View()
+	case ScreenSettings:
+		return a.settings.View()
 	default:
 		return a.main.View()
 	}

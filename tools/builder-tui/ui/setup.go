@@ -160,21 +160,25 @@ func (s SetupScreen) View() string {
 		bad               bool
 	}
 	rows := []row{
-		{"1", "Kernel       ", okOr(s.app.Paths.Kernel, "(not found)"), s.app.Paths.Kernel == ""},
-		{"2", "Clang        ", okOr(s.app.Paths.Clang, "(not found)"), s.app.Paths.Clang == ""},
-		{"3", "AnyKernel3   ", okOr(s.app.Paths.AnyKernel, "(not found)"), s.app.Paths.AnyKernel == ""},
-		{"4", "Output       ", okOr(s.app.Paths.Output, "(unset)"), s.app.Paths.Output == ""},
-		{"5", "aarch64-gcc  ", okOr(s.app.Paths.GccArm64, "(not found)"), s.app.Paths.GccArm64 == ""},
-		{"6", "arm-gcc      ", okOr(s.app.Paths.GccArm, "(not found)"), s.app.Paths.GccArm == ""},
+		{"1", "Kernel", okOr(s.app.Paths.Kernel, "(not found)"), s.app.Paths.Kernel == ""},
+		{"2", "Clang", okOr(s.app.Paths.Clang, "(not found)"), s.app.Paths.Clang == ""},
+		{"3", "AnyKernel3", okOr(s.app.Paths.AnyKernel, "(not found)"), s.app.Paths.AnyKernel == ""},
+		{"4", "Output", okOr(s.app.Paths.Output, "(unset)"), s.app.Paths.Output == ""},
+		{"5", "aarch64-gcc", okOr(s.app.Paths.GccArm64, "(not found)"), s.app.Paths.GccArm64 == ""},
+		{"6", "arm-gcc", okOr(s.app.Paths.GccArm, "(not found)"), s.app.Paths.GccArm == ""},
 	}
+	innerW := innerContentWidth(w)
+	const labelW = 11 // widest label ("AnyKernel3") + a little breathing room
 	var p strings.Builder
 	for i, r := range rows {
 		v := ValueStyle
 		if r.bad {
 			v = ErrText
 		}
-		tag := components.BracketTag(r.key, 1, HotKeyStyle)
-		p.WriteString("  " + tag + "  " + LabelStyle.Render(r.label) + "  " + v.Render(r.value))
+		tag := components.GlobalBracketTag(r.key, HotKeyStyle)
+		label := LabelStyle.Render(padTo(r.label, labelW))
+		prefix := tag + "  " + label
+		p.WriteString(components.LeaderRow(prefix, v.Render(r.value), innerW, MutedText))
 		if i < len(rows)-1 {
 			p.WriteString("\n")
 		}

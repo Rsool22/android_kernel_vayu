@@ -204,30 +204,31 @@ func configMtime(p string) int64 {
 	return 0
 }
 
-// featureRow renders one feature row with [N] tag, label, and a status
-// badge. All four badge variants (ENABLED/DISABLED/N/A/NO DRIVER) are
-// padded to a fixed width so they line up across rows.
-func featureRow(num, name string, enabled, available, driver bool) string {
+// featureRow renders one feature row with [N] tag, label, dotted leader
+// and a status badge that right-aligns inside the panel. All four badge
+// variants (ENABLED/DISABLED/N/A/NO DRIVER) are padded to a fixed width
+// so they line up across rows; the leader fills the gap between label
+// and badge so badges sit at the same column regardless of label width.
+func featureRow(num, name string, enabled, available, driver bool, width int) string {
 	const badgeW = 10
-	tag := components.BracketTag(num, 1, HotKeyStyle)
+	tag := components.GlobalBracketTag(num, HotKeyStyle)
+	var label, rhs string
 	switch {
 	case !driver:
-		return "  " + tag + "  " +
-			ValueStyle.Render(name) + "  " +
-			components.Badge(padTo("NO DRIVER", badgeW), BadgeErr)
+		label = ValueStyle.Render(name)
+		rhs = components.Badge(padTo("NO DRIVER", badgeW), BadgeErr)
 	case !available:
-		return "  " + tag + "  " +
-			DimText.Render(name) + "  " +
-			components.Badge(padTo("N/A", badgeW), BadgeWarn)
+		label = DimText.Render(name)
+		rhs = components.Badge(padTo("N/A", badgeW), BadgeWarn)
 	case enabled:
-		return "  " + tag + "  " +
-			ValueStyle.Bold(true).Render(name) + "  " +
-			components.Badge(padTo("ENABLED", badgeW), BadgeOK)
+		label = ValueStyle.Bold(true).Render(name)
+		rhs = components.Badge(padTo("ENABLED", badgeW), BadgeOK)
 	default:
-		return "  " + tag + "  " +
-			DimText.Render(name) + "  " +
-			components.Badge(padTo("DISABLED", badgeW), BadgeAccent)
+		label = DimText.Render(name)
+		rhs = components.Badge(padTo("DISABLED", badgeW), BadgeAccent)
 	}
+	prefix := tag + "  " + label
+	return components.LeaderRow(prefix, rhs, width, MutedText)
 }
 
 func (s FeaturesScreen) View() string {
@@ -248,9 +249,9 @@ func (s FeaturesScreen) View() string {
 
 	// ── Toggles panel ───────────────────────────────────────────────────────
 	var p strings.Builder
-	p.WriteString(featureRow("1", "ReSukiSU  (CONFIG_KSU)", st.KSU, true, driver) + "\n")
-	p.WriteString(featureRow("2", "SuSFS     (CONFIG_KSU_SUSFS)", st.SUSFS, st.KSU, driver) + "\n")
-	p.WriteString(featureRow("3", "KPM       (CONFIG_KPM)", st.KPM, st.KSU, driver))
+	p.WriteString(featureRow("1", "ReSukiSU  (CONFIG_KSU)", st.KSU, true, driver, innerW) + "\n")
+	p.WriteString(featureRow("2", "SuSFS     (CONFIG_KSU_SUSFS)", st.SUSFS, st.KSU, driver, innerW) + "\n")
+	p.WriteString(featureRow("3", "KPM       (CONFIG_KPM)", st.KPM, st.KSU, driver, innerW))
 	togPanel := components.Panel("Toggles", p.String(), w, PanelBorder, TitleStyle)
 
 	// ── Summary panel ───────────────────────────────────────────────────────
