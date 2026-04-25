@@ -48,6 +48,11 @@ type Config struct {
 
 	// KSUBranch is the active ReSukiSU branch ("main" or "dev").
 	KSUBranch string
+
+	// Theme selects the visual palette ("bash", "modern", "ocean",
+	// "forest", "mono"). Empty defaults to "bash" — the original
+	// bash build.sh aesthetic.
+	Theme string
 }
 
 // Defaults returns a sensible starting Config.
@@ -79,6 +84,7 @@ func Defaults() Config {
 		ZyCTarget:    "latest",
 		GoogleTarget: "latest",
 		KSUBranch:    "main",
+		Theme:        "bash",
 	}
 }
 

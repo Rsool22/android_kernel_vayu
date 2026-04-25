@@ -10,14 +10,16 @@ import (
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/ui/components"
 )
 
-// SetupScreen is the strict 1:1 port of the bash `do_setup` /
-// `_draw_setup_menu`: a 2-row wrapper menu that dispatches to either the
-// path-editor (PathsScreen) or the dependency probe (DepsScreen).
+// SetupScreen is the wrapper menu for second-tier setup actions: path
+// editor (PathsScreen), dependency probe (DepsScreen), and the theme
+// picker for visual customisation.
 //
-// Hotkeys: P / D / R (return). ESC also returns to main.
+// Hotkeys: P / D / C / R (return). ESC also returns to main. [C] cycles
+// through the bundled palettes (bash → modern → ocean → forest → mono),
+// applies the new style live, and persists the choice to Cfg.Theme.
 type SetupScreen struct {
 	app    *App
-	cursor int // 0..2 — P, D, R rows
+	cursor int // 0..3 — P, D, C, R rows
 }
 
 func NewSetupScreen(a *App) SetupScreen { return SetupScreen{app: a} }
@@ -35,12 +37,12 @@ func (s SetupScreen) Update(msg tea.Msg) (SetupScreen, tea.Cmd) {
 			}
 			return s, nil
 		case "down":
-			if s.cursor < 2 {
+			if s.cursor < 3 {
 				s.cursor++
 			}
 			return s, nil
 		case "enter":
-			key = []string{"p", "d", "r"}[s.cursor]
+			key = []string{"p", "d", "c", "r"}[s.cursor]
 		}
 		switch key {
 		case "p":
@@ -49,6 +51,16 @@ func (s SetupScreen) Update(msg tea.Msg) (SetupScreen, tea.Cmd) {
 		case "d":
 			s.app.Screen = ScreenDeps
 			return s, s.app.deps.Init()
+		case "c":
+			// Cycle to next theme, apply live, persist.
+			cur := ParseStyle(s.app.Cfg.Theme)
+			next := (int(cur) + 1) % len(StyleNames)
+			s.app.Cfg.Theme = StyleNames[next]
+			ApplyStyle(StyleVariant(next))
+			s.app.PersistConfig()
+			s.app.Toast = "theme → " + s.app.Cfg.Theme
+			s.app.ToastErr = false
+			return s, nil
 		case "r", "esc":
 			s.app.Screen = ScreenMain
 			return s, nil
@@ -73,6 +85,7 @@ func (s SetupScreen) View() string {
 	items := []menuItem{
 		{"P", "Configure Paths", "kernel/clang/output dirs"},
 		{"D", "Check Dependencies", "verify + install packages"},
+		{"C", "Customize Theme", "current → " + okOr(s.app.Cfg.Theme, "bash")},
 		{"R", "Return to Main Menu", ""},
 	}
 
@@ -115,7 +128,7 @@ func (s SetupScreen) View() string {
 		extras.WriteString("\n")
 	}
 
-	help := HelpStyle.Render("  Select [P/D/R] · esc to return")
+	help := HelpStyle.Render("  Select [P/D/C/R] · esc to return")
 	var toast string
 	if s.app.Toast != "" {
 		toast = "  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
