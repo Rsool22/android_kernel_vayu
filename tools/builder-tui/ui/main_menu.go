@@ -32,6 +32,9 @@ func (m MainMenu) Update(msg tea.Msg) (MainMenu, tea.Cmd) {
 		case "k":
 			m.app.Screen = ScreenKSU
 			return m, m.app.ksu.Init()
+		case "f":
+			m.app.Screen = ScreenFeatures
+			return m, m.app.features.Init()
 		case "s":
 			m.app.Screen = ScreenSetup
 			return m, m.app.setup.Init()
@@ -80,6 +83,7 @@ func (m MainMenu) View() string {
 		{"B", "Build kernel", "compile + package", ColorOK},
 		{"T", "Toolchain manager", "Google AOSP / ZyC", ColorAccent},
 		{"K", "ReSukiSU driver", "install / update", ColorWarn},
+		{"F", "Feature toggles", "KSU / SuSFS / KPM", ColorAccent},
 		{"S", "Setup / paths", "deps + config", ColorAccent},
 		{"Q", "Quit", "exit builder", ColorMuted},
 	}

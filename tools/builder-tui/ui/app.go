@@ -18,6 +18,7 @@ const (
 	ScreenToolchain
 	ScreenKSU
 	ScreenBuild
+	ScreenFeatures
 )
 
 // Program is set by the entrypoint (cmd.Execute) once tea.NewProgram returns,
@@ -41,6 +42,7 @@ type App struct {
 	ksu       KSUScreen
 	build     BuildScreen
 	setup     SetupScreen
+	features  FeaturesScreen
 }
 
 // NewApp constructs the root app and pre-runs path autodiscovery.
@@ -58,6 +60,7 @@ func NewApp(cfg config.Config) *App {
 	a.ksu = NewKSUScreen(a)
 	a.build = NewBuildScreen(a)
 	a.setup = NewSetupScreen(a)
+	a.features = NewFeaturesScreen(a)
 	return a
 }
 
@@ -93,6 +96,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.build, cmd = a.build.Update(msg)
 		cmds = append(cmds, cmd)
 		a.setup, cmd = a.setup.Update(msg)
+		cmds = append(cmds, cmd)
+		a.features, cmd = a.features.Update(msg)
 		cmds = append(cmds, cmd)
 		return a, tea.Batch(cmds...)
 	case tea.KeyMsg:
@@ -133,6 +138,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.setup, cmd = a.setup.Update(msg)
 		return a, cmd
+	case ScreenFeatures:
+		var cmd tea.Cmd
+		a.features, cmd = a.features.Update(msg)
+		return a, cmd
 	}
 	return a, nil
 }
@@ -148,6 +157,8 @@ func (a *App) View() string {
 		return a.build.View()
 	case ScreenSetup:
 		return a.setup.View()
+	case ScreenFeatures:
+		return a.features.View()
 	default:
 		return a.main.View()
 	}
