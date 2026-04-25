@@ -206,24 +206,48 @@ func FindCrossCompiler(names ...string) string {
 // Resolve runs the full discovery pass and returns Paths populated for the
 // builder.
 //
-// overrides come from config.Config. When kernelOverride is set, it wins
-// outright; otherwise we walk up from start to find a kernel root. If no
-// root is detected (TUI started outside any kernel tree), we DON'T return
-// an error — instead we leave Kernel="" and let the caller display the
-// configured override / default for the user to fix on the Setup screen.
+// overrides come from config.Config and are treated as HINTS, not hard
+// overrides: a kernelOverride is honoured only when it actually points at a
+// real kernel tree. When it doesn't (e.g. a stale default in CI where the
+// runner's $HOME is empty), we fall back to walking up from start. This
+// preserves the config.go contract — "These are starting hints — autodiscovery
+// still wins when a real kernel tree is detected near $cwd."
+//
+// outputOverride is similarly tied to the kernel root: when we ignore a stale
+// kernelOverride we also ignore its matching outputOverride so p.Output lands
+// under the real kernel tree (CI's $GITHUB_WORKSPACE/Anykernel-Builds).
+//
+// If no kernel root is detected at all (TUI started outside any kernel tree),
+// we DON'T return an error — instead we leave Kernel="" and let the caller
+// display the configured override / default for the user to fix on the
+// Setup screen.
 func Resolve(start, kernelOverride, clangOverride, anyOverride, outputOverride,
 	gcc64Override, gcc32Override string) (Paths, error) {
 	p := Paths{
-		Output: outputOverride,
 		Distro: DetectPackageManager(),
 	}
-	root := kernelOverride
+
+	root := ""
+	outputFromStaleOverride := false
+	if kernelOverride != "" && isKernelRoot(kernelOverride) {
+		root = kernelOverride
+	}
 	if root == "" {
 		if r, err := FindKernelRoot(start); err == nil {
 			root = r
 		}
+		// kernelOverride was set but invalid — its paired outputOverride
+		// (derived from the same stale default) is also untrustworthy.
+		if kernelOverride != "" && outputOverride != "" &&
+			strings.HasPrefix(outputOverride, kernelOverride) {
+			outputFromStaleOverride = true
+		}
 	}
 	p.Kernel = root
+
+	if !outputFromStaleOverride {
+		p.Output = outputOverride
+	}
 	if p.Output == "" && root != "" {
 		p.Output = filepath.Join(root, "Anykernel-Builds")
 	}
