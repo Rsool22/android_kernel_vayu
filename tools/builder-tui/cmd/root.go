@@ -13,6 +13,8 @@ import (
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/ui"
 )
 
+var rootStyle string
+
 // rootCmd, when run with no subcommand, opens the interactive TUI.
 var rootCmd = &cobra.Command{
 	Use:   "vayu-builder",
@@ -36,6 +38,15 @@ power users perform individual actions headlessly:
 			fmt.Fprintln(os.Stderr, "warning: load config:", err)
 			cfg = config.Defaults()
 		}
+		switch rootStyle {
+		case "modern":
+			ui.ApplyStyle(ui.StyleModern)
+		case "", "bash":
+			ui.ApplyStyle(ui.StyleBash)
+		default:
+			fmt.Fprintf(os.Stderr, "warning: unknown --style %q (using bash)\n", rootStyle)
+			ui.ApplyStyle(ui.StyleBash)
+		}
 		app := ui.NewApp(cfg)
 		p := tea.NewProgram(app, tea.WithAltScreen())
 		ui.Program = p
@@ -53,6 +64,8 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.PersistentFlags().StringVar(&rootStyle, "style", "bash",
+		"visual variant: bash (double-line, magenta/cyan/yellow) | modern (rounded, soft palette)")
 	rootCmd.AddCommand(buildCmd, fetchClangCmd, probeCmd, pathsCmd, versionCmd)
 }
 

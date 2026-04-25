@@ -19,6 +19,52 @@ import (
 // Width is the active draw width; resized live by App on tea.WindowSizeMsg.
 var Width = 80
 
+// StyleVariant selects the visual mode. "bash" (default) replicates the
+// chunky double-line bordered look of the original build.sh; "modern" uses
+// a softer rounded-corner aesthetic with a subdued palette. Set via the
+// --style flag in cmd/root.go before the App starts rendering.
+type StyleVariant int
+
+const (
+	StyleBash StyleVariant = iota
+	StyleModern
+)
+
+// CurrentStyle is the active variant. Changed at most once during init.
+var CurrentStyle StyleVariant = StyleBash
+
+// ApplyStyle swaps the package-level styles to match v. Call once before
+// tea.NewProgram.Run().
+func ApplyStyle(v StyleVariant) {
+	CurrentStyle = v
+	switch v {
+	case StyleModern:
+		ColorBanner = lipgloss.Color("99")  // soft purple
+		ColorPanel = lipgloss.Color("75")   // periwinkle
+		ColorTitle = lipgloss.Color("117")  // sky
+		ColorAccent = lipgloss.Color("141") // lavender
+		ColorHotKey = lipgloss.Color("215") // peach
+		BannerBorder = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder(), true).
+			BorderForeground(ColorBanner).
+			Padding(0, 1)
+		PanelBorder = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder(), true).
+			BorderForeground(ColorPanel).
+			Padding(0, 1)
+		PanelOK = PanelBorder.BorderForeground(ColorOK)
+		PanelWarn = PanelBorder.BorderForeground(ColorWarn)
+		PanelErr = PanelBorder.BorderForeground(ColorErr)
+		PanelDim = PanelBorder.BorderForeground(ColorMuted)
+		TitleStyle = lipgloss.NewStyle().Foreground(ColorTitle).Bold(true)
+		BannerTitle = lipgloss.NewStyle().Foreground(ColorValue).Bold(true)
+		BannerSubtle = lipgloss.NewStyle().Foreground(ColorAccent).Italic(true)
+		SubtitleStyle = lipgloss.NewStyle().Foreground(ColorAccent)
+		HotKeyStyle = lipgloss.NewStyle().Foreground(ColorHotKey).Bold(true)
+		AccentText = lipgloss.NewStyle().Foreground(ColorAccent)
+	}
+}
+
 // Palette adapted from the bash TUI:
 //
 //	MAG = bold magenta (banner)
