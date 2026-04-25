@@ -125,16 +125,14 @@ func (s FeaturesScreen) Update(msg tea.Msg) (FeaturesScreen, tea.Cmd) {
 			s.app.ToastErr = false
 		case "m":
 			return s, s.runMenuconfig()
-		case "c":
-			// Confirm & Continue — strict 1:1 port of bash run_feat_menu's
-			// `c` action. Drives the linear flow Features → Build Options
-			// → do_build.
+		case "c", "b", "esc":
+			// [C] (Confirm & Continue), [B] (Back), and esc all return
+			// to Build Options, which is the screen that opened this
+			// one via [F]. [C] is kept as a familiar alias from the
+			// bash original; the linear Main → BuildOptions → Build
+			// pipeline never auto-advances through Features.
 			s.app.Screen = ScreenBuildOptions
 			return s, s.app.buildOpts.Init()
-		case "b":
-			// Back to Mode Select — bash original returns to mode menu.
-			s.app.Screen = ScreenMain
-			return s, nil
 		case "q":
 			// In bash this quits the whole script; preserve the same
 			// shortcut here.
@@ -317,20 +315,8 @@ func (s FeaturesScreen) View() string {
 	}
 	sumPanel := components.Panel("Active features", sm.String(), w, PanelBorder, TitleStyle)
 
-	// ── Action strip ────────────────────────────────────────────────────────
-	actions := components.HotkeyStripWrap([]components.Hotkey{
-		{Key: "1", Desc: "ReSukiSU", Sub: "toggle"},
-		{Key: "2", Desc: "SuSFS", Sub: "toggle"},
-		{Key: "3", Desc: "KPM", Sub: "toggle"},
-		{Key: "M", Desc: "Menuconfig", Sub: "interactive"},
-		{Key: "C", Desc: "Confirm & Continue"},
-		{Key: "B", Desc: "Back to Mode Select"},
-		{Key: "R", Desc: "Reload"},
-		{Key: "Q", Desc: "Quit"},
-	}, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
-
-	divider := components.Separator(w, MutedText) + "\n"
-	out := banner + "\n" + togPanel + "\n" + sumPanel + "\n" + divider + "  " + actions + "\n"
+	out := banner + "\n" + togPanel + "\n" + sumPanel + "\n" +
+		"  " + HelpStyle.Render("Select [1/2/3/M/R/C]\u00a0\u00b7\u00a0esc to return") + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}

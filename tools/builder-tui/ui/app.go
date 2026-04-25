@@ -148,14 +148,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		case "q":
 			// q on Paths screen goes back to Setup wrapper, matching the
-			// bash do_paths_config behaviour. Same for Deps. All other
-			// non-main screens fall back to the main menu, except text
-			// fields where the child screen handles 'q' itself.
+			// bash do_paths_config behaviour. Same for Deps. Features
+			// ESCs back to BuildOptions (since BuildOptions opens it
+			// via [F]). All other non-main screens fall back to the
+			// main menu, except text fields where the child screen
+			// handles 'q' itself.
 			switch a.Screen {
 			case ScreenMain:
 				return a, tea.Quit
-			case ScreenPaths, ScreenDeps:
-				// Forward to child so it can route to ScreenSetup.
+			case ScreenPaths, ScreenDeps, ScreenFeatures, ScreenBuildOptions:
+				// Forward to child so it can route appropriately.
 			default:
 				a.Screen = ScreenMain
 				return a, nil
@@ -164,8 +166,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch a.Screen {
 			case ScreenMain:
 				// no-op
-			case ScreenPaths, ScreenDeps:
-				// Forward to child so it routes to ScreenSetup.
+			case ScreenPaths, ScreenDeps, ScreenFeatures, ScreenBuildOptions:
+				// Forward to child so it routes appropriately:
+				//   Paths/Deps → Setup
+				//   Features   → BuildOptions
+				//   BuildOpts  → Main
 			default:
 				a.Screen = ScreenMain
 				return a, nil

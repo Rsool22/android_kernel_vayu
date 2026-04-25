@@ -116,13 +116,11 @@ func (s SetupScreen) View() string {
 	}
 
 	help := HelpStyle.Render("  Select [P/D/R] · esc to return")
-	divider := components.Separator(w, MutedText) + "\n"
-
 	var toast string
 	if s.app.Toast != "" {
 		toast = "  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}
-	return banner + "\n" + menuPanel + "\n" + extras.String() + divider + toast + help
+	return banner + "\n" + menuPanel + "\n" + extras.String() + toast + help
 }
 
 // installHints returns the distro-specific install command(s) for missing

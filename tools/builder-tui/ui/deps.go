@@ -247,6 +247,7 @@ func (s DepsScreen) installPreview(pkgs []string) string {
 
 func (s DepsScreen) View() string {
 	w := panelWidth(s.app.Width)
+	inner := innerContentWidth(w)
 
 	banner := components.Banner(
 		"DEPENDENCY  CHECK",
@@ -288,21 +289,27 @@ func (s DepsScreen) View() string {
 	}
 	tablePanel := components.Panel("Probes", strings.TrimRight(tbl.String(), "\n"), w, PanelBorder, TitleStyle)
 
-	// Action strip
-	actions := components.HotkeyStripWrap([]components.Hotkey{
-		{Key: "P", Desc: "Re-probe"},
-		{Key: "C", Desc: "Show install cmd"},
-		{Key: "I", Desc: "Install missing", Sub: "via " + string(s.app.Paths.Distro)},
-		{Key: "ESC", Desc: "Back"},
-	}, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
+	// ── Actions panel ───────────────────────────────────────────────────────
+	leader := lipgloss.NewStyle().Foreground(ColorMuted)
+	labelStyle := lipgloss.NewStyle().Foreground(ColorValue).Bold(true)
+	var act strings.Builder
+	act.WriteString(components.MenuRow("P", "Re-probe", "refresh status", inner, 1,
+		HotKeyStyle, labelStyle, MutedText, leader) + "\n")
+	act.WriteString(components.MenuRow("C", "Show install cmd",
+		"copy/paste manually", inner, 1,
+		HotKeyStyle, labelStyle, MutedText, leader) + "\n")
+	act.WriteString(components.MenuRow("I", "Install missing",
+		"via "+string(s.app.Paths.Distro), inner, 1,
+		HotKeyStyle, labelStyle, MutedText, leader))
+	actPanel := components.Panel("Actions", act.String(), w, PanelBorder, TitleStyle)
 
 	var busyLine string
 	if s.busy {
 		busyLine = "\n  " + lipgloss.NewStyle().Foreground(ColorAccent).Render("⟳  "+s.stage)
 	}
 
-	divider := components.Separator(w, MutedText) + "\n"
-	out := banner + "\n" + statusPanel + "\n" + tablePanel + "\n" + divider + "  " + actions + busyLine + "\n"
+	out := banner + "\n" + statusPanel + "\n" + tablePanel + "\n" + actPanel + "\n" +
+		"  " + HelpStyle.Render("Select [P/C/I]\u00a0\u00b7\u00a0esc to return") + busyLine + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}

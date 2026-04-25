@@ -293,24 +293,14 @@ func (s PathsScreen) View() string {
 		warnPanel = components.Panel("Path Issues", body, w, PanelErr, ErrText) + "\n"
 	}
 
-	var actions string
+	var helpText string
 	if s.editing != 0 {
-		actions = components.HotkeyStripWrap([]components.Hotkey{
-			{Key: "Enter", Desc: "Save"},
-			{Key: "ESC", Desc: "Cancel"},
-		}, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
+		helpText = "Enter saves · esc cancels"
 	} else {
-		actions = components.HotkeyStripWrap([]components.Hotkey{
-			{Key: "1-6", Desc: "Edit", Sub: "path slot"},
-			{Key: "↑/↓", Desc: "Navigate"},
-			{Key: "Enter", Desc: "Edit selected"},
-			{Key: "R", Desc: "Re-scan"},
-			{Key: "B/ESC", Desc: "Back to Setup"},
-		}, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
+		helpText = "Select [1-6/Enter/R/B] · esc to return"
 	}
-
-	divider := components.Separator(w, MutedText) + "\n"
-	out := banner + "\n" + pathsPanel + "\n" + editorPanel + warnPanel + divider + "  " + actions + "\n"
+	out := banner + "\n" + pathsPanel + "\n" + editorPanel + warnPanel +
+		"  " + HelpStyle.Render(helpText) + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}

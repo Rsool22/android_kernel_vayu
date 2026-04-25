@@ -140,9 +140,21 @@ func (s BuildOptionsScreen) Update(msg tea.Msg) (BuildOptionsScreen, tea.Cmd) {
 			}
 			s.app.Screen = ScreenBuild
 			return s, s.app.build.Init()
-		case "b":
-			s.app.Screen = ScreenFeatures
+		case "b", "esc":
+			// Back to Mode Select — the linear pipeline is
+			//   Main → BuildOptions → [S] → do_build (compile → package).
+			// Feature toggles are reachable here through [F] but never
+			// gate this back-arrow.
+			s.app.Screen = ScreenMain
 			return s, nil
+		case "f":
+			// Optional jump to Feature Configuration (KSU / SuSFS / KPM
+			// toggles + Menuconfig). Returning from there with [C] or
+			// [B] lands back here — it never auto-advances to Build.
+			s.app.Screen = ScreenFeatures
+			return s, s.app.features.Init()
+		case "q":
+			return s, tea.Quit
 		}
 	}
 	return s, nil
@@ -204,9 +216,12 @@ func (s BuildOptionsScreen) View() string {
 		fmt.Sprintf("next #%s → #1", strconv.Itoa(next)), AccentText, inner) + "\n")
 	body.WriteString(components.Separator(inner, MutedText) + "\n")
 
+	body.WriteString(buildOptRowStyled("F", "Feature Configuration",
+		"KSU / SuSFS / KPM toggles", AccentText, inner) + "\n")
+	body.WriteString(components.Separator(inner, MutedText) + "\n")
 	body.WriteString(buildOptRowStyled("S", "Start Build",
 		fmt.Sprintf("compile + package as #%s", strconv.Itoa(next)), OKText, inner) + "\n")
-	body.WriteString(buildOptRowStyled("B", "Back", "to Features", LabelStyle, inner))
+	body.WriteString(buildOptRowStyled("B", "Back", "to Mode Select", LabelStyle, inner))
 	togglesPanel := components.Panel("Build Options", body.String(), w, PanelBorder, TitleStyle)
 
 	// ── Inline kernel-name editor ───────────────────────────────────────────
@@ -217,20 +232,8 @@ func (s BuildOptionsScreen) View() string {
 			w, PanelBorder.BorderForeground(ColorBanner), TitleStyle.Foreground(ColorBanner)) + "\n"
 	}
 
-	// ── Hotkey strip + toast + help ─────────────────────────────────────────
-	actions := components.HotkeyStripWrap([]components.Hotkey{
-		{Key: "N", Desc: "Name"},
-		{Key: "I", Desc: "Incr."},
-		{Key: "C", Desc: "ccache"},
-		{Key: "X", Desc: "Reset"},
-		{Key: "S", Desc: "Start"},
-		{Key: "B", Desc: "Back"},
-		{Key: "ESC", Desc: "Main"},
-	}, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
-
 	out := banner + "\n" + summaryPanel + "\n" + togglesPanel + editor + "\n" +
-		components.Separator(w, MutedText) + "\n" +
-		"  " + actions + "\n"
+		"  " + HelpStyle.Render("Select [N/I/C/X/F/S/B]\u00a0\u00b7\u00a0esc to return") + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}

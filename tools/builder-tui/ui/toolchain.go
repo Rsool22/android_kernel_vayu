@@ -51,15 +51,20 @@ func NewToolchainScreen(a *App) ToolchainScreen {
 }
 
 func (s ToolchainScreen) Init() tea.Cmd {
-	// Strict 1:1 parity with bash: ZyC is the only supported vendor.
-	// Migrate stale Auto/Google selections silently on screen entry so the
-	// state panel and the version-slot picker render coherently.
-	if s.app.Cfg.ClangSource != config.ClangZyC {
+	// ZyC is the default, but Google AOSP clang is also offered now;
+	// preserve any previously-saved Google selection. Migrate the legacy
+	// "Auto" mode to ZyC silently since the bash original only supports
+	// the two concrete vendors.
+	if s.app.Cfg.ClangSource == config.ClangAuto {
 		s.app.Cfg.ClangSource = config.ClangZyC
 		_ = s.app.Cfg.Save()
 	}
 	if s.app.Cfg.ZyCTarget == "" {
 		s.app.Cfg.ZyCTarget = "23"
+		_ = s.app.Cfg.Save()
+	}
+	if s.app.Cfg.GoogleTarget == "" {
+		s.app.Cfg.GoogleTarget = "latest"
 		_ = s.app.Cfg.Save()
 	}
 	return nil
@@ -77,25 +82,26 @@ type tcInstallDoneMsg struct{ err error }
 type sourceItem struct {
 	hotkey string
 	desc   string
-	isZyC  bool   // true = a ZyC-target sub-row, only enabled when ZyC active
-	zycTag string // e.g. "23", "15", "latest" — only when isZyC
+	source config.ClangSource
+	zycTag string // e.g. "23", "15", "latest" — only used when source==ClangZyC
 }
 
 // sourceItems returns the rows currently rendered in the Source panel,
-// in display order. Strict 1:1 parity with the bash original: ZyC is the
-// only supported vendor, listed as three version slots (23 / 15 / latest).
+// in display order. Two vendors are exposed: Google AOSP (single row) and
+// ZyC Clang (three version slots — 23.x / 15.x / latest).
 func (s ToolchainScreen) sourceItems() []sourceItem {
 	return []sourceItem{
-		{hotkey: "2", desc: "ZyC Clang 23.x  (current)", isZyC: true, zycTag: "23"},
-		{hotkey: "1", desc: "ZyC Clang 15.x  (legacy)", isZyC: true, zycTag: "15"},
-		{hotkey: "L", desc: "Latest         (any version)", isZyC: true, zycTag: "latest"},
+		{hotkey: "G", desc: "Google AOSP Clang  (main-kernel/clang)", source: config.ClangGoogle},
+		{hotkey: "2", desc: "ZyC Clang 23.x  (current)", source: config.ClangZyC, zycTag: "23"},
+		{hotkey: "1", desc: "ZyC Clang 15.x  (legacy)", source: config.ClangZyC, zycTag: "15"},
+		{hotkey: "L", desc: "ZyC Clang latest  (any version)", source: config.ClangZyC, zycTag: "latest"},
 	}
 }
 
-// applySource picks the version slot at cursor and persists it.
+// applySource picks the row at cursor and persists it.
 func (s *ToolchainScreen) applySource(it sourceItem) {
-	s.app.Cfg.ClangSource = config.ClangZyC
-	if it.isZyC {
+	s.app.Cfg.ClangSource = it.source
+	if it.source == config.ClangZyC && it.zycTag != "" {
 		s.app.Cfg.ZyCTarget = it.zycTag
 	}
 	s.app.PersistConfig()
@@ -127,24 +133,29 @@ func (s ToolchainScreen) Update(msg tea.Msg) (ToolchainScreen, tea.Cmd) {
 				s.applySource(it)
 			}
 			return s, nil
-		case "l":
-			s.app.Cfg.ClangSource = config.ClangZyC
-			s.app.Cfg.ZyCTarget = "latest"
+		case "g":
+			s.app.Cfg.ClangSource = config.ClangGoogle
 			s.app.PersistConfig()
 			s.log.OK("target → " + sourceLabel(s.app.Cfg))
-			s.cursor = 2
-		case "1":
-			s.app.Cfg.ClangSource = config.ClangZyC
-			s.app.Cfg.ZyCTarget = "15"
-			s.app.PersistConfig()
-			s.log.OK("target → " + sourceLabel(s.app.Cfg))
-			s.cursor = 1
+			s.cursor = 0
 		case "2":
 			s.app.Cfg.ClangSource = config.ClangZyC
 			s.app.Cfg.ZyCTarget = "23"
 			s.app.PersistConfig()
 			s.log.OK("target → " + sourceLabel(s.app.Cfg))
-			s.cursor = 0
+			s.cursor = 1
+		case "1":
+			s.app.Cfg.ClangSource = config.ClangZyC
+			s.app.Cfg.ZyCTarget = "15"
+			s.app.PersistConfig()
+			s.log.OK("target → " + sourceLabel(s.app.Cfg))
+			s.cursor = 2
+		case "l":
+			s.app.Cfg.ClangSource = config.ClangZyC
+			s.app.Cfg.ZyCTarget = "latest"
+			s.app.PersistConfig()
+			s.log.OK("target → " + sourceLabel(s.app.Cfg))
+			s.cursor = 3
 		case "r", "b":
 			s.app.Screen = ScreenMain
 			return s, nil
@@ -238,10 +249,16 @@ func (s ToolchainScreen) View() string {
 	}
 	var src strings.Builder
 	for i, it := range items {
-		selected := s.app.Cfg.ClangSource == config.ClangZyC && s.app.Cfg.ZyCTarget == it.zycTag
+		var selected bool
+		switch it.source {
+		case config.ClangGoogle:
+			selected = s.app.Cfg.ClangSource == config.ClangGoogle
+		case config.ClangZyC:
+			selected = s.app.Cfg.ClangSource == config.ClangZyC && s.app.Cfg.ZyCTarget == it.zycTag
+		}
 		src.WriteString(srcRow(it.hotkey, it.desc, selected, i == s.cursor, inner) + "\n")
 	}
-	srcPanel := components.Panel("ZyC Target", strings.TrimRight(src.String(), "\n"),
+	srcPanel := components.Panel("Source", strings.TrimRight(src.String(), "\n"),
 		w, PanelBorder, TitleStyle)
 
 	// ── Activity log ────────────────────────────────────────────────────────
@@ -254,19 +271,25 @@ func (s ToolchainScreen) View() string {
 	}
 	logPanel := components.Panel("Activity", logBody, w, PanelBorder, TitleStyle)
 
-	// ── Action strip + ↑/↓/Enter hint ──────────────────────────────────────
-	actions := components.HotkeyStripWrap([]components.Hotkey{
-		{Key: "F", Desc: "Fetch", Sub: "check + download"},
-		{Key: "C", Desc: "Check Latest", Sub: "query upstream"},
-		{Key: "23", Desc: "ZyC 23.x"},
-		{Key: "15", Desc: "ZyC 15.x"},
-		{Key: "L", Desc: "Latest"},
-		{Key: "R", Desc: "Return"},
-	}, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
+	// ── Actions panel ───────────────────────────────────────────────────────
+	leader := lipgloss.NewStyle().Foreground(ColorMuted)
+	var act strings.Builder
+	act.WriteString(components.MenuRow("F", "Fetch",
+		"download + install selected target", inner, 1,
+		HotKeyStyle, lipgloss.NewStyle().Foreground(ColorValue).Bold(true),
+		MutedText, leader) + "\n")
+	act.WriteString(components.MenuRow("C", "Check Latest",
+		"query upstream, no install", inner, 1,
+		HotKeyStyle, lipgloss.NewStyle().Foreground(ColorValue).Bold(true),
+		MutedText, leader) + "\n")
+	act.WriteString(components.MenuRow("R", "Return", "to Mode Select", inner, 1,
+		HotKeyStyle, lipgloss.NewStyle().Foreground(ColorValue).Bold(true),
+		MutedText, leader))
+	actPanel := components.Panel("Actions", act.String(), w, PanelBorder, TitleStyle)
 
-	divider := components.Separator(w, MutedText) + "\n"
-	return banner + "\n" + statePanel + "\n" + srcPanel + "\n" + logPanel + "\n" +
-		divider + "  " + actions + "\n"
+	return banner + "\n" + statePanel + "\n" + srcPanel + "\n" +
+		actPanel + "\n" + logPanel + "\n" +
+		"  " + HelpStyle.Render("Select [G/2/1/L/F/C/R]\u00a0\u00b7\u00a0esc to return") + "\n"
 }
 
 // srcRow renders one source-selector row. selected = persisted active source;

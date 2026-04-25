@@ -81,9 +81,11 @@ func (m MainMenu) Update(msg tea.Msg) (MainMenu, tea.Cmd) {
 				m.app.ToastErr = true
 				return m, nil
 			}
-			// Linear bash flow: B → Features → Build Options → do_build.
-			m.app.Screen = ScreenFeatures
-			return m, m.app.features.Init()
+			// B drives directly into Build Options; from there [S] starts
+			// the linear compile → package pipeline. Feature toggles live
+			// behind [F] inside Build Options, not in this linear path.
+			m.app.Screen = ScreenBuildOptions
+			return m, m.app.buildOpts.Init()
 		case "p":
 			// Package-only — only valid when Image already exists in out/.
 			if !m.app.HasImage {
@@ -265,15 +267,10 @@ func (m MainMenu) View() string {
 		strings.Join(opts, "/"), m.app.Width, m.app.Height,
 	))
 
-	// Divider spans the same width as the panel above it so it looks like
-	// a continuation of the box edge instead of a half-width line floating
-	// in the middle.
-	divider := components.Separator(w, MutedText) + "\n"
 	return banner + "\n" +
 		prevPanel + "\n" +
 		menuPanel + "\n" +
 		extras.String() +
-		divider +
 		toast +
 		help
 }
@@ -300,46 +297,42 @@ func clampWidth(w, min, max int) int {
 	return w
 }
 
-// panelWidth returns the screen width used for banners/panels: the full
-// terminal width minus a 2-column right gutter so trailing borders never
-// touch the right edge of the terminal. Adapts down to the actual terminal
-// width on narrow screens (mobile SSH clients) instead of forcing a 60-col
-// minimum that would cause horrible mid-bracket wrapping by the emulator.
+// panelWidth returns the outer width used for banners and panels. The
+// returned value is the full rendered box width, including the left and
+// right border columns; callers pass this directly to components.Banner /
+// components.Panel without subtracting anything else.
+//
+// Behaviour:
+//   - On a normal terminal we use the full width with no upper clamp so
+//     wide SSH terminals get to use the space (the bash original does the
+//     same via `set_width`).
+//   - We always reserve a single-column right gutter, so the right border
+//     never hugs the very last terminal column — some emulators (notably
+//     macOS Terminal and PuTTY) will wrap the next character to a new
+//     line if a glyph lands on the final column.
+//   - On very narrow screens (mobile SSH) we clamp to 24 to keep the box
+//     drawable. Below that the UI degrades to label-only rows.
 func panelWidth(termWidth int) int {
 	if termWidth <= 0 {
 		termWidth = 80
 	}
-	w := termWidth - 2
-	// Hard floor: panels need a minimum width or the bordered box can't
-	// hold even a 4-column inner area. Below this the UI is unusable
-	// regardless, so clamp and let the caller live with horizontal scroll.
+	w := termWidth - 1
 	if w < 24 {
 		w = 24
-	}
-	if w > 160 {
-		w = 160
 	}
 	return w
 }
 
-// innerContentWidth is the visible content area inside a panel after
-// border (2) + horizontal padding (2). Used to size MenuRow leaders, KV
-// padding, etc.
+// innerContentWidth is the visible content area inside a panel, i.e. the
+// width passed to lipgloss.Style.Width by components.Panel. Used by callers
+// that need to size MenuRow leaders, KV padding, separators, etc. so they
+// align with the inner box width.
 func innerContentWidth(outerWidth int) int {
-	w := outerWidth - 4
+	w := outerWidth - 2
 	if w < 8 {
 		w = 8
 	}
 	return w
 }
 
-// stripWidth returns the width available for hotkey strips and other
-// floating content rendered just below the panel stack: 2-space outer
-// gutter on each side of the content.
-func stripWidth(termWidth int) int {
-	w := termWidth - 4
-	if w < 16 {
-		w = 16
-	}
-	return w
-}
+

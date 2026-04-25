@@ -432,12 +432,8 @@ func (s BuildScreen) View() string {
 		resultPanel = "\n" + s.renderResultPanel(w, inner) + "\n"
 	}
 
-	// Action strip.
-	actions := s.renderActions()
-
 	out := banner + "\n" + stagesPanel + "\n" + vpHeader + s.vp.View() + resultPanel + "\n" +
-		components.Separator(w, MutedText) + "\n" +
-		"  " + actions + "\n"
+		"  " + HelpStyle.Render(s.helpLine()) + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}
@@ -596,35 +592,21 @@ func (s BuildScreen) renderCancelSummary(inner int) string {
 	return b.String()
 }
 
-func (s BuildScreen) renderActions() string {
+// helpLine returns a single-line description of the keys available in the
+// build screen depending on its current state (running / post-build / idle).
+func (s BuildScreen) helpLine() string {
 	if s.running {
-		return components.HotkeyStripWrap([]components.Hotkey{
-			{Key: "Ctrl+C", Desc: "Cancel"},
-			{Key: "↑/↓", Desc: "Scroll"},
-			{Key: "ESC", Desc: "Main"},
-		}, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
+		return "Ctrl+C cancels · ↑/↓ scroll · esc to return"
 	}
 	if s.postBuild {
-		items := []components.Hotkey{
-			{Key: "T", Desc: "Retry full clean"},
-			{Key: "I", Desc: "Retry incremental"},
-		}
+		opts := []string{"T", "I"}
 		if s.app.MenuconfigUsed {
-			items = append(items,
-				components.Hotkey{Key: "V", Desc: "Preserve menuconfig"},
-				components.Hotkey{Key: "D", Desc: "Write defconfig"},
-			)
+			opts = append(opts, "V", "D")
 		}
-		items = append(items,
-			components.Hotkey{Key: "R", Desc: "Return to main"},
-			components.Hotkey{Key: "E", Desc: "Exit"},
-		)
-		return components.HotkeyStripWrap(items, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
+		opts = append(opts, "R", "E")
+		return "Select [" + strings.Join(opts, "/") + "] · esc to return"
 	}
-	return components.HotkeyStripWrap([]components.Hotkey{
-		{Key: "B", Desc: "Build", Sub: "configure → compile → package"},
-		{Key: "ESC", Desc: "Back"},
-	}, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
+	return "Press [B] to build · esc to return"
 }
 
 // truncate returns s clipped to maxRunes with an ellipsis when needed.

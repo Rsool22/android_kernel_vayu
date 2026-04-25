@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/features"
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/pipeline"
@@ -272,19 +273,26 @@ func (s KSUScreen) View() string {
 	}
 	logPanel := components.Panel("Activity", logBody, w, PanelBorder, TitleStyle)
 
-	// ── Action strip (wraps on narrow terminals) ────────────────────────────
-	actions := components.HotkeyStripWrap([]components.Hotkey{
-		{Key: "I", Desc: "Install / update", Sub: "from active branch"},
-		{Key: "S", Desc: "Switch", Sub: "main ↔ dev"},
-		{Key: "V", Desc: "Verify guards"},
-		{Key: "X", Desc: "Remove driver"},
-		{Key: "P", Desc: "Re-probe"},
-		{Key: "ESC", Desc: "Back"},
-	}, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
+	// ── Actions panel ───────────────────────────────────────────────────────
+	leader := lipgloss.NewStyle().Foreground(ColorMuted)
+	labelStyle := lipgloss.NewStyle().Foreground(ColorValue).Bold(true)
+	var act strings.Builder
+	act.WriteString(components.MenuRow("I", "Install / update",
+		"from active branch", innerW, 1,
+		HotKeyStyle, labelStyle, MutedText, leader) + "\n")
+	act.WriteString(components.MenuRow("S", "Switch", "main ↔ dev", innerW, 1,
+		HotKeyStyle, labelStyle, MutedText, leader) + "\n")
+	act.WriteString(components.MenuRow("V", "Verify guards", "lint hook patterns", innerW, 1,
+		HotKeyStyle, labelStyle, MutedText, leader) + "\n")
+	act.WriteString(components.MenuRow("X", "Remove driver", "uninstall + clean", innerW, 1,
+		HotKeyStyle, labelStyle, MutedText, leader) + "\n")
+	act.WriteString(components.MenuRow("P", "Re-probe", "refresh upstream state", innerW, 1,
+		HotKeyStyle, labelStyle, MutedText, leader))
+	actPanel := components.Panel("Actions", act.String(), w, PanelBorder, TitleStyle)
 
-	divider := components.Separator(w, MutedText) + "\n"
-	return banner + "\n" + selPanel + "\n" + upsPanel + "\n" + logPanel + "\n" +
-		divider + "  " + actions + "\n"
+	return banner + "\n" + selPanel + "\n" + upsPanel + "\n" +
+		actPanel + "\n" + logPanel + "\n" +
+		"  " + HelpStyle.Render("Select [I/S/V/X/P]\u00a0\u00b7\u00a0esc to return") + "\n"
 }
 
 // pathExists returns true when p exists (file or dir).

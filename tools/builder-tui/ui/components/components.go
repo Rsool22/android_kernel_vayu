@@ -21,7 +21,7 @@ func Banner(title, subtitle string, width int, border lipgloss.Style, titleStyle
 	if width < 20 {
 		width = 20
 	}
-	inner := width - 4 // border (2) + padding (2)
+	inner := width - 2 // border occupies 2 columns; no extra padding
 	if inner < 8 {
 		inner = 8
 	}
@@ -43,7 +43,7 @@ func Panel(title, body string, width int, border lipgloss.Style, titleStyle lipg
 	if width < 12 {
 		width = 12
 	}
-	inner := width - 4
+	inner := width - 2
 	if inner < 4 {
 		inner = 4
 	}
@@ -84,9 +84,11 @@ func KVWrap(key, value string, keyWidth, valueWidth int, keyStyle, valStyle lipg
 	return out
 }
 
-// BracketTag renders "[label]" right-padded so the closing bracket sits at
-// column (1 + maxLabelWidth + 1). Used to keep [main]/[dev] columns aligned
-// regardless of inner text length.
+// BracketTag renders "[label]" with optional right-padding so the closing
+// bracket sits at column (1 + maxLabelWidth + 1). Used to keep [main]/[dev]
+// columns aligned in tabular layouts (e.g. the ReSukiSU branch table).
+// Most callers pass maxLabelWidth = len(label) (or 0/1) so brackets hug
+// their label, matching the bash original (`[B]` not `[B  ]`).
 func BracketTag(label string, maxLabelWidth int, style lipgloss.Style) string {
 	if maxLabelWidth < len(label) {
 		maxLabelWidth = len(label)
@@ -132,17 +134,14 @@ func HotkeyStrip(items []Hotkey, keyStyle, descStyle, subStyle, sepStyle lipglos
 	return HotkeyStripWrap(items, 0, keyStyle, descStyle, subStyle, sepStyle)
 }
 
-// HotkeyStripWrap is HotkeyStrip with a maxWidth (0 = no wrap).
+// HotkeyStripWrap is HotkeyStrip with a maxWidth (0 = no wrap). Brackets
+// are NOT cross-aligned to the longest key in the strip — each tag hugs
+// its own label so a strip with `[L]` and `[23]` doesn't render as
+// `[L ] | [23]`.
 func HotkeyStripWrap(items []Hotkey, maxWidth int, keyStyle, descStyle, subStyle, sepStyle lipgloss.Style) string {
-	maxKey := 0
-	for _, h := range items {
-		if len(h.Key) > maxKey {
-			maxKey = len(h.Key)
-		}
-	}
 	rendered := make([]string, 0, len(items))
 	for _, h := range items {
-		row := BracketTag(h.Key, maxKey, keyStyle) + " " + descStyle.Render(h.Desc)
+		row := BracketTag(h.Key, len(h.Key), keyStyle) + " " + descStyle.Render(h.Desc)
 		if h.Sub != "" {
 			row += " " + subStyle.Render("("+h.Sub+")")
 		}
