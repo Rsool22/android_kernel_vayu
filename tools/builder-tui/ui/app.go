@@ -22,6 +22,7 @@ const (
 	ScreenKSU
 	ScreenBuild
 	ScreenFeatures
+	ScreenBuildOptions
 )
 
 // Program is set by the entrypoint (cmd.Execute) once tea.NewProgram returns,
@@ -53,12 +54,13 @@ type App struct {
 	// will be restored on the next build (banner shown on Mode menu).
 	MenuconfigPreserved bool
 
-	main      MainMenu
-	toolchain ToolchainScreen
-	ksu       KSUScreen
-	build     BuildScreen
-	setup     SetupScreen
-	features  FeaturesScreen
+	main       MainMenu
+	toolchain  ToolchainScreen
+	ksu        KSUScreen
+	build      BuildScreen
+	setup      SetupScreen
+	features   FeaturesScreen
+	buildOpts  BuildOptionsScreen
 }
 
 // NewApp constructs the root app and pre-runs path autodiscovery.
@@ -78,6 +80,7 @@ func NewApp(cfg config.Config) *App {
 	a.build = NewBuildScreen(a)
 	a.setup = NewSetupScreen(a)
 	a.features = NewFeaturesScreen(a)
+	a.buildOpts = NewBuildOptionsScreen(a)
 	return a
 }
 
@@ -115,6 +118,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.setup, cmd = a.setup.Update(msg)
 		cmds = append(cmds, cmd)
 		a.features, cmd = a.features.Update(msg)
+		cmds = append(cmds, cmd)
+		a.buildOpts, cmd = a.buildOpts.Update(msg)
 		cmds = append(cmds, cmd)
 		return a, tea.Batch(cmds...)
 	case tea.KeyMsg:
@@ -159,6 +164,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.features, cmd = a.features.Update(msg)
 		return a, cmd
+	case ScreenBuildOptions:
+		var cmd tea.Cmd
+		a.buildOpts, cmd = a.buildOpts.Update(msg)
+		return a, cmd
 	}
 	return a, nil
 }
@@ -176,6 +185,8 @@ func (a *App) View() string {
 		return a.setup.View()
 	case ScreenFeatures:
 		return a.features.View()
+	case ScreenBuildOptions:
+		return a.buildOpts.View()
 	default:
 		return a.main.View()
 	}

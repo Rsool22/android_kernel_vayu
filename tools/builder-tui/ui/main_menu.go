@@ -35,8 +35,8 @@ func (m MainMenu) Update(msg tea.Msg) (MainMenu, tea.Cmd) {
 				m.app.ToastErr = true
 				return m, nil
 			}
-			m.app.Screen = ScreenBuild
-			return m, m.app.build.Init()
+			m.app.Screen = ScreenBuildOptions
+			return m, m.app.buildOpts.Init()
 		case "p":
 			// Package-only — only valid when Image already exists in out/.
 			if !m.app.HasImage {
@@ -158,7 +158,7 @@ func (m MainMenu) View() string {
 		branchTag = "main"
 	}
 	items := []menuItem{
-		{"B", "Build kernel", "configure → compile → package", ColorOK, m.pathsLocked()},
+		{"B", "Build kernel", "options → compile → package", ColorOK, m.pathsLocked()},
 	}
 	if m.app.HasImage {
 		items = append(items, menuItem{"P", "Package existing image", "skip compile", ColorOK, m.pathsLocked()})
