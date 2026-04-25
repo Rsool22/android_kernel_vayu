@@ -31,7 +31,9 @@ var buildCmd = &cobra.Command{
 	Short: "Run the full bash-1:1 pipeline (clean → defconfig → guards → compile → package)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, _ := config.Load()
-		p, err := discover.Resolve(".", cfg.KernelDir, cfg.ClangDir, cfg.AnyKernelDir, cfg.OutputDir)
+		p, err := discover.Resolve(".",
+			cfg.KernelDir, cfg.ClangDir, cfg.AnyKernelDir, cfg.OutputDir,
+			cfg.GCC64Dir, cfg.GCC32Dir)
 		if err != nil {
 			return err
 		}

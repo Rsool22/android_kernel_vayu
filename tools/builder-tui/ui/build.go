@@ -436,7 +436,7 @@ func (s BuildScreen) View() string {
 	actions := s.renderActions()
 
 	out := banner + "\n" + stagesPanel + "\n" + vpHeader + s.vp.View() + resultPanel + "\n" +
-		"  " + components.Separator(inner, MutedText) + "\n" +
+		components.Separator(w, MutedText) + "\n" +
 		"  " + actions + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"

@@ -235,7 +235,6 @@ func (s FeaturesScreen) View() string {
 		s.refresh()
 	}
 	w := panelWidth(s.app.Width)
-	innerW := innerContentWidth(w)
 
 	banner := components.Banner(
 		"FEATURE  CONFIGURATION",
@@ -267,16 +266,16 @@ func (s FeaturesScreen) View() string {
 	sumPanel := components.Panel("Active features", sm.String(), w, PanelBorder, TitleStyle)
 
 	// ── Action strip ────────────────────────────────────────────────────────
-	actions := components.HotkeyStrip([]components.Hotkey{
+	actions := components.HotkeyStripWrap([]components.Hotkey{
 		{Key: "1", Desc: "ReSukiSU", Sub: "toggle"},
 		{Key: "2", Desc: "SuSFS", Sub: "toggle"},
 		{Key: "3", Desc: "KPM", Sub: "toggle"},
 		{Key: "M", Desc: "Menuconfig", Sub: "interactive"},
 		{Key: "R", Desc: "Reload"},
 		{Key: "ESC", Desc: "Back"},
-	}, HotKeyStyle, ValueStyle, DimText, MutedText)
+	}, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
 
-	divider := "  " + components.Separator(innerW, MutedText) + "\n"
+	divider := components.Separator(w, MutedText) + "\n"
 	out := banner + "\n" + togPanel + "\n" + sumPanel + "\n" + divider + "  " + actions + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"

@@ -18,6 +18,10 @@ import (
 
 // KSUScreen surfaces ReSukiSU branch availability and install/update actions.
 // Branch probes run on entry and on demand (key 'p').
+//
+// All operation feedback (probe, install, verify, remove) goes into the live
+// activity log panel rendered above the action strip — no more transient
+// one-line toasts that overwrite each other or get re-printed.
 type KSUScreen struct {
 	app    *App
 	main   resukisu.Probe
@@ -25,9 +29,12 @@ type KSUScreen struct {
 	probed bool
 	busy   bool
 	stage  string
+	log    *components.Activity
 }
 
-func NewKSUScreen(a *App) KSUScreen { return KSUScreen{app: a} }
+func NewKSUScreen(a *App) KSUScreen {
+	return KSUScreen{app: a, log: components.NewActivity()}
+}
 
 func (s KSUScreen) Init() tea.Cmd { return s.probeCmd() }
 
@@ -64,18 +71,15 @@ func (s KSUScreen) Update(msg tea.Msg) (KSUScreen, tea.Cmd) {
 		s.dev = m.dev
 		s.probed = true
 		s.busy = false
-		s.app.Toast = "Upstream probed."
-		s.app.ToastErr = false
+		s.log.OK("upstream probed: main=" + string(m.main.State) + " dev=" + string(m.dev.State))
 		return s, nil
 	case ksuActionDoneMsg:
 		s.busy = false
 		s.stage = ""
 		if m.err != nil {
-			s.app.Toast = m.stage + " failed: " + m.err.Error()
-			s.app.ToastErr = true
+			s.log.Err(m.stage + " failed: " + m.err.Error())
 		} else {
-			s.app.Toast = m.stage + " complete."
-			s.app.ToastErr = false
+			s.log.OK(m.stage + " complete")
 		}
 		return s, nil
 	case tea.KeyMsg:
@@ -86,6 +90,7 @@ func (s KSUScreen) Update(msg tea.Msg) (KSUScreen, tea.Cmd) {
 		case "p":
 			s.busy = true
 			s.stage = "probing upstream"
+			s.log.Info("probing ReSukiSU branches …")
 			return s, s.probeCmd()
 		case "s":
 			if s.app.Cfg.KSUBranch == "main" {
@@ -94,46 +99,49 @@ func (s KSUScreen) Update(msg tea.Msg) (KSUScreen, tea.Cmd) {
 				s.app.Cfg.KSUBranch = "main"
 			}
 			s.app.PersistConfig()
+			s.log.OK("active branch → " + s.app.Cfg.KSUBranch)
 		case "i", "u":
 			selected := s.app.Cfg.KSUBranch
 			brstate := s.branchState(selected)
 			if brstate != resukisu.StatePresent {
-				s.app.Toast = "Cannot install: " + selected + " branch is " + string(brstate)
-				s.app.ToastErr = true
+				s.log.Err("cannot install: " + selected + " branch is " + string(brstate))
 				return s, nil
 			}
 			s.busy = true
 			s.stage = "installing " + selected
+			s.log.Info("installing ReSukiSU [" + selected + "] …")
 			return s, s.installCmd(selected)
 		case "v":
 			s.busy = true
 			s.stage = "verifying KSU hook guards"
+			s.log.Info("running apply_ksu_guards.py …")
 			return s, s.guardCmd()
 		case "x":
 			s.busy = true
 			s.stage = "removing driver (setup.sh --cleanup)"
+			s.log.Warn("removing driver via setup.sh --cleanup …")
 			return s, s.removeCmd()
 		}
 	case ksuGuardDoneMsg:
 		s.busy = false
 		s.stage = ""
 		if m.err != nil {
-			s.app.Toast = "Guards: " + m.err.Error()
-			s.app.ToastErr = true
+			s.log.Err("guards: " + m.err.Error())
 		} else if m.report.Summary != "" {
-			s.app.Toast = "Guards: " + m.report.Summary
-			s.app.ToastErr = m.report.HasFixes()
+			if m.report.HasFixes() {
+				s.log.Warn("guards: " + m.report.Summary)
+			} else {
+				s.log.OK("guards: " + m.report.Summary)
+			}
 		} else {
-			s.app.Toast = "Guards verified"
-			s.app.ToastErr = false
+			s.log.OK("guards verified")
 		}
 		return s, nil
 	case ksuRemoveDoneMsg:
 		s.busy = false
 		s.stage = ""
 		if m.err != nil {
-			s.app.Toast = "Remove failed: " + m.err.Error()
-			s.app.ToastErr = true
+			s.log.Err("remove failed: " + m.err.Error())
 			return s, nil
 		}
 		if m.rc == 0 && m.dirGone {
@@ -141,11 +149,9 @@ func (s KSUScreen) Update(msg tea.Msg) (KSUScreen, tea.Cmd) {
 			s.app.Builder.ForceCleanReason = "Driver removed"
 			s.app.Builder.Incremental = false
 			_ = s.app.Builder.Save(s.app.Paths.Kernel)
-			s.app.Toast = "Driver removed -- defconfig reset"
-			s.app.ToastErr = false
+			s.log.OK("driver removed; defconfig reset")
 		} else {
-			s.app.Toast = "Cleanup failed or driver already gone (exit " + itoa(m.rc) + ")"
-			s.app.ToastErr = true
+			s.log.Err("cleanup failed or driver already gone (exit " + itoa(m.rc) + ")")
 		}
 		return s, nil
 	}
@@ -235,6 +241,7 @@ func (s KSUScreen) installCmd(branch string) tea.Cmd {
 
 func (s KSUScreen) View() string {
 	w := panelWidth(s.app.Width)
+	innerW := innerContentWidth(w)
 
 	banner := components.Banner(
 		"ReSukiSU  DRIVER  MANAGER",
@@ -246,37 +253,38 @@ func (s KSUScreen) View() string {
 	activeBadge := components.Badge(strings.ToUpper(s.app.Cfg.KSUBranch), BadgeAccent)
 	var sel strings.Builder
 	sel.WriteString(components.KV("Active", activeBadge, 9, LabelStyle, ValueStyle) + "\n")
-	sel.WriteString(components.KV("Target", s.app.Paths.Kernel+"/drivers/kernelsu", 9, LabelStyle, AccentText))
+	sel.WriteString(components.KVWrap("Target",
+		s.app.Paths.Kernel+"/drivers/kernelsu",
+		9, innerW-12, LabelStyle, AccentText))
 	selPanel := components.Panel("Selection", sel.String(), w, PanelBorder, TitleStyle)
 
 	// ── Upstream branch states ──────────────────────────────────────────────
-	// Right-pad branch label to the widest value so badges align in a column.
 	branchW := 4 // max(len("main"), len("dev"))
 	var ups strings.Builder
 	ups.WriteString(probeRow("main", branchW, s.main, s.probed) + "\n")
 	ups.WriteString(probeRow("dev", branchW, s.dev, s.probed))
 	upsPanel := components.Panel("Upstream branches", ups.String(), w, PanelBorder, TitleStyle)
 
-	// ── Action strip ────────────────────────────────────────────────────────
-	actions := components.HotkeyStrip([]components.Hotkey{
+	// ── Activity log ────────────────────────────────────────────────────────
+	logBody := s.log.Render(8)
+	if s.busy {
+		logBody += "\n" + AccentText.Render(s.stage+" …")
+	}
+	logPanel := components.Panel("Activity", logBody, w, PanelBorder, TitleStyle)
+
+	// ── Action strip (wraps on narrow terminals) ────────────────────────────
+	actions := components.HotkeyStripWrap([]components.Hotkey{
 		{Key: "I", Desc: "Install / update", Sub: "from active branch"},
 		{Key: "S", Desc: "Switch", Sub: "main ↔ dev"},
 		{Key: "V", Desc: "Verify guards"},
 		{Key: "X", Desc: "Remove driver"},
 		{Key: "P", Desc: "Re-probe"},
 		{Key: "ESC", Desc: "Back"},
-	}, HotKeyStyle, ValueStyle, DimText, MutedText)
+	}, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
 
-	divider := "  " + components.Separator(innerContentWidth(w), MutedText) + "\n"
-	out := banner + "\n" + selPanel + "\n" + upsPanel + "\n" + divider + "  " + actions + "\n"
-
-	if s.busy {
-		out += "\n  " + AccentText.Render(s.stage+" …") + "\n"
-	}
-	if s.app.Toast != "" {
-		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
-	}
-	return out
+	divider := components.Separator(w, MutedText) + "\n"
+	return banner + "\n" + selPanel + "\n" + upsPanel + "\n" + logPanel + "\n" +
+		divider + "  " + actions + "\n"
 }
 
 // pathExists returns true when p exists (file or dir).

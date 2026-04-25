@@ -10,12 +10,36 @@ import (
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/ui/components"
 )
 
-// MainMenu is the entry screen. Hotkeys: B/P/T/K/F/S/Q.
+// MainMenu is the entry screen. Hotkeys: B/P/T/K/F/S/D/Q. ↑/↓ + Enter also
+// navigate; Enter activates the highlighted row.
 type MainMenu struct {
-	app *App
+	app    *App
+	cursor int
 }
 
 func NewMainMenu(a *App) MainMenu { return MainMenu{app: a} }
+
+// menuActionKey returns the hotkey letter for the row at index i in the
+// dynamic menu list (which omits [P] when no image exists).
+func (m MainMenu) menuActionKey(i int) string {
+	keys := []string{"b"}
+	if m.app.HasImage {
+		keys = append(keys, "p")
+	}
+	keys = append(keys, "t", "k", "f", "s", "d", "q")
+	if i >= 0 && i < len(keys) {
+		return keys[i]
+	}
+	return ""
+}
+
+func (m MainMenu) menuLen() int {
+	n := 7 // B + T K F S D Q
+	if m.app.HasImage {
+		n++
+	}
+	return n
+}
 
 func (m MainMenu) Init() tea.Cmd { return nil }
 
@@ -28,7 +52,23 @@ func (m MainMenu) pathsLocked() bool {
 func (m MainMenu) Update(msg tea.Msg) (MainMenu, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch strings.ToLower(msg.String()) {
+		key := strings.ToLower(msg.String())
+		// Arrow-key + Enter navigation.
+		switch key {
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+			return m, nil
+		case "down", "j":
+			if m.cursor < m.menuLen()-1 {
+				m.cursor++
+			}
+			return m, nil
+		case "enter":
+			key = m.menuActionKey(m.cursor)
+		}
+		switch key {
 		case "b":
 			if m.pathsLocked() {
 				m.app.Toast = "Cannot build — fix Clang / AnyKernel3 paths in Setup first"
@@ -194,10 +234,15 @@ func (m MainMenu) View() string {
 			rhs = "BLOCKED — fix paths first"
 			rhsStyle = ErrText
 		}
-		row := components.MenuRow(it.key, it.label, rhs, innerW, maxKey,
+		// 2-char marker before the row so highlighted row gets a chevron.
+		mark := "  "
+		if i == m.cursor {
+			mark = AccentText.Render(" ›")
+		}
+		row := components.MenuRow(it.key, it.label, rhs, innerW-2, maxKey,
 			HotKeyStyle, labelStyle, rhsStyle, leader,
 		)
-		menu.WriteString(row)
+		menu.WriteString(mark + row)
 		if i < len(items)-1 {
 			menu.WriteString("\n")
 		}
@@ -244,7 +289,10 @@ func (m MainMenu) View() string {
 		strings.Join(opts, "/"), m.app.Width, m.app.Height,
 	))
 
-	divider := "  " + components.Separator(innerW, MutedText) + "\n"
+	// Divider spans the same width as the panel above it so it looks like
+	// a continuation of the box edge instead of a half-width line floating
+	// in the middle.
+	divider := components.Separator(w, MutedText) + "\n"
 	return banner + "\n" +
 		prevPanel + "\n" +
 		statusPanel + "\n" +
@@ -279,14 +327,19 @@ func clampWidth(w, min, max int) int {
 
 // panelWidth returns the screen width used for banners/panels: the full
 // terminal width minus a 2-column right gutter so trailing borders never
-// touch the right edge of the terminal (looks much cleaner on most emulators).
+// touch the right edge of the terminal. Adapts down to the actual terminal
+// width on narrow screens (mobile SSH clients) instead of forcing a 60-col
+// minimum that would cause horrible mid-bracket wrapping by the emulator.
 func panelWidth(termWidth int) int {
 	if termWidth <= 0 {
 		termWidth = 80
 	}
 	w := termWidth - 2
-	if w < 60 {
-		w = 60
+	// Hard floor: panels need a minimum width or the bordered box can't
+	// hold even a 4-column inner area. Below this the UI is unusable
+	// regardless, so clamp and let the caller live with horizontal scroll.
+	if w < 24 {
+		w = 24
 	}
 	if w > 160 {
 		w = 160
@@ -299,8 +352,19 @@ func panelWidth(termWidth int) int {
 // padding, etc.
 func innerContentWidth(outerWidth int) int {
 	w := outerWidth - 4
-	if w < 20 {
-		w = 20
+	if w < 8 {
+		w = 8
+	}
+	return w
+}
+
+// stripWidth returns the width available for hotkey strips and other
+// floating content rendered just below the panel stack: 2-space outer
+// gutter on each side of the content.
+func stripWidth(termWidth int) int {
+	w := termWidth - 4
+	if w < 16 {
+		w = 16
 	}
 	return w
 }

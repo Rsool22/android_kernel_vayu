@@ -204,35 +204,63 @@ func FindCrossCompiler(names ...string) string {
 }
 
 // Resolve runs the full discovery pass and returns Paths populated for the
-// builder. overrides come from config.Config.
-func Resolve(start, kernelOverride, clangOverride, anyOverride, outputOverride string) (Paths, error) {
+// builder.
+//
+// overrides come from config.Config. When kernelOverride is set, it wins
+// outright; otherwise we walk up from start to find a kernel root. If no
+// root is detected (TUI started outside any kernel tree), we DON'T return
+// an error — instead we leave Kernel="" and let the caller display the
+// configured override / default for the user to fix on the Setup screen.
+func Resolve(start, kernelOverride, clangOverride, anyOverride, outputOverride,
+	gcc64Override, gcc32Override string) (Paths, error) {
 	p := Paths{
 		Output: outputOverride,
 		Distro: DetectPackageManager(),
 	}
 	root := kernelOverride
 	if root == "" {
-		var err error
-		root, err = FindKernelRoot(start)
-		if err != nil {
-			return p, err
+		if r, err := FindKernelRoot(start); err == nil {
+			root = r
 		}
 	}
 	p.Kernel = root
-	if p.Output == "" {
-		p.Output = filepath.Join(root, "out")
+	if p.Output == "" && root != "" {
+		p.Output = filepath.Join(root, "Anykernel-Builds")
 	}
 	p.Clang = FindClang(clangOverride, root)
 	p.AnyKernel = FindAnyKernel(anyOverride, root)
-	p.GccArm64 = FindCrossCompiler(
+
+	// GCC: prefer the user-configured directory (matches bash GCC{64,32}_DIR),
+	// falling back to PATH lookup. Stored as a directory so Setup can show
+	// it as an editable bin-dir, mirroring the bash UX.
+	p.GccArm64 = resolveGccDir(gcc64Override,
 		"aarch64-linux-gnu-gcc",
 		"aarch64-linux-android-gcc",
 		"aarch64-none-linux-gnu-gcc",
 	)
-	p.GccArm = FindCrossCompiler(
+	p.GccArm = resolveGccDir(gcc32Override,
 		"arm-linux-gnueabi-gcc",
 		"arm-linux-gnueabihf-gcc",
 		"arm-linux-androideabi-gcc",
 	)
 	return p, nil
+}
+
+// resolveGccDir returns the directory containing one of the named gcc binaries.
+// Honours `override` first; falls back to PATH lookup. Returns "" if nothing
+// is found anywhere.
+func resolveGccDir(override string, names ...string) string {
+	if override != "" {
+		for _, n := range names {
+			if _, err := os.Stat(filepath.Join(override, n)); err == nil {
+				return override
+			}
+		}
+	}
+	for _, n := range names {
+		if p, err := exec.LookPath(n); err == nil {
+			return filepath.Dir(p)
+		}
+	}
+	return override
 }

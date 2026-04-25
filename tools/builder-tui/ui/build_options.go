@@ -218,7 +218,7 @@ func (s BuildOptionsScreen) View() string {
 	}
 
 	// ── Hotkey strip + toast + help ─────────────────────────────────────────
-	actions := components.HotkeyStrip([]components.Hotkey{
+	actions := components.HotkeyStripWrap([]components.Hotkey{
 		{Key: "N", Desc: "Name"},
 		{Key: "I", Desc: "Incr."},
 		{Key: "C", Desc: "ccache"},
@@ -226,10 +226,10 @@ func (s BuildOptionsScreen) View() string {
 		{Key: "S", Desc: "Start"},
 		{Key: "B", Desc: "Back"},
 		{Key: "ESC", Desc: "Main"},
-	}, HotKeyStyle, ValueStyle, DimText, MutedText)
+	}, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
 
 	out := banner + "\n" + summaryPanel + "\n" + togglesPanel + editor + "\n" +
-		"  " + components.Separator(inner, MutedText) + "\n" +
+		components.Separator(w, MutedText) + "\n" +
 		"  " + actions + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"

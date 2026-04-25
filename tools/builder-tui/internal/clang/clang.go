@@ -360,9 +360,22 @@ func downloadTo(ctx context.Context, url string, w io.Writer, progress ProgressF
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("http %d for %s", resp.StatusCode, url)
 	}
+	// Gitiles serves the +archive tarball with chunked transfer and no
+	// Content-Length (we get -1). Fall back to "indeterminate" mode and
+	// surface the bytes downloaded so the caller can render a meaningful
+	// status line instead of a stuck-at-0% progress bar.
 	total := resp.ContentLength
 	pr := &progressReader{r: resp.Body, total: total, cb: progress}
+	if progress != nil {
+		// Emit an immediate 0/total tick so the UI can switch into download
+		// mode the moment headers come back, not 100ms later.
+		progress(0, total)
+	}
 	_, err = io.Copy(w, pr)
+	if err == nil && progress != nil {
+		// Final tick so the UI shows 100% / final byte count.
+		progress(pr.read, pr.read)
+	}
 	return err
 }
 

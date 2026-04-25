@@ -75,7 +75,9 @@ type App struct {
 
 // NewApp constructs the root app and pre-runs path autodiscovery.
 func NewApp(cfg config.Config) *App {
-	p, _ := discover.Resolve(".", cfg.KernelDir, cfg.ClangDir, cfg.AnyKernelDir, cfg.OutputDir)
+	p, _ := discover.Resolve(".",
+		cfg.KernelDir, cfg.ClangDir, cfg.AnyKernelDir, cfg.OutputDir,
+		cfg.GCC64Dir, cfg.GCC32Dir)
 	a := &App{
 		Cfg:    cfg,
 		Paths:  p,

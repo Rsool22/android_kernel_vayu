@@ -284,19 +284,19 @@ func (s DepsScreen) View() string {
 	tablePanel := components.Panel("Probes", strings.TrimRight(tbl.String(), "\n"), w, PanelBorder, TitleStyle)
 
 	// Action strip
-	actions := components.HotkeyStrip([]components.Hotkey{
+	actions := components.HotkeyStripWrap([]components.Hotkey{
 		{Key: "P", Desc: "Re-probe"},
 		{Key: "C", Desc: "Show install cmd"},
 		{Key: "I", Desc: "Install missing", Sub: "via " + string(s.app.Paths.Distro)},
 		{Key: "ESC", Desc: "Back"},
-	}, HotKeyStyle, ValueStyle, DimText, MutedText)
+	}, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
 
 	var busyLine string
 	if s.busy {
 		busyLine = "\n  " + lipgloss.NewStyle().Foreground(ColorAccent).Render("⟳  "+s.stage)
 	}
 
-	divider := "  " + components.Separator(innerContentWidth(w), MutedText) + "\n"
+	divider := components.Separator(w, MutedText) + "\n"
 	out := banner + "\n" + statusPanel + "\n" + tablePanel + "\n" + divider + "  " + actions + busyLine + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"

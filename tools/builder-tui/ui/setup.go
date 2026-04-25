@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/config"
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/discover"
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/ui/components"
 )
@@ -25,10 +26,15 @@ const (
 
 // SetupScreen renders the resolved paths panel + distro install hints
 // and exposes inline path editing via bubbles textinput.
+//
+// Rows are navigable by hotkey (1-6) OR ↑/↓ + Enter. Long values wrap to a
+// continuation line indented under the value column so paths never overflow
+// off-screen.
 type SetupScreen struct {
-	app   *App
+	app     *App
 	editing pathField
-	input textinput.Model
+	input   textinput.Model
+	cursor  int // 0..5, indexes into pathField list for arrow-nav
 }
 
 func NewSetupScreen(a *App) SetupScreen {
@@ -43,6 +49,11 @@ func NewSetupScreen(a *App) SetupScreen {
 }
 
 func (s SetupScreen) Init() tea.Cmd { return nil }
+
+// fields returns all path fields in display order.
+func (s SetupScreen) fields() []pathField {
+	return []pathField{fieldKernel, fieldClang, fieldAnyKernel, fieldOutput, fieldGcc64, fieldGcc32}
+}
 
 // fieldValue returns the current persisted value for a given field.
 func (s SetupScreen) fieldValue(f pathField) string {
@@ -63,8 +74,28 @@ func (s SetupScreen) fieldValue(f pathField) string {
 	return ""
 }
 
+// resolvedValue returns the autodiscovered value for a given field, used as
+// the starting placeholder when the persisted value is empty.
+func (s SetupScreen) resolvedValue(f pathField) string {
+	switch f {
+	case fieldKernel:
+		return s.app.Paths.Kernel
+	case fieldClang:
+		return s.app.Paths.Clang
+	case fieldAnyKernel:
+		return s.app.Paths.AnyKernel
+	case fieldOutput:
+		return s.app.Paths.Output
+	case fieldGcc64:
+		return s.app.Paths.GccArm64
+	case fieldGcc32:
+		return s.app.Paths.GccArm
+	}
+	return ""
+}
+
 func (s *SetupScreen) setFieldValue(f pathField, v string) {
-	v = strings.TrimSpace(v)
+	v = config.ExpandTilde(strings.TrimSpace(v))
 	switch f {
 	case fieldKernel:
 		s.app.Cfg.KernelDir = v
@@ -100,6 +131,15 @@ func fieldLabel(f pathField) string {
 	return ""
 }
 
+// rescan re-runs discovery using the current config overrides and updates
+// app.Paths in-place. Used after every save / on key 'R' / on tilde expansion.
+func (s *SetupScreen) rescan() {
+	p, _ := discover.Resolve(".",
+		s.app.Cfg.KernelDir, s.app.Cfg.ClangDir, s.app.Cfg.AnyKernelDir, s.app.Cfg.OutputDir,
+		s.app.Cfg.GCC64Dir, s.app.Cfg.GCC32Dir)
+	s.app.Paths = p
+}
+
 func (s SetupScreen) Update(msg tea.Msg) (SetupScreen, tea.Cmd) {
 	if s.editing != 0 {
 		switch m := msg.(type) {
@@ -108,9 +148,7 @@ func (s SetupScreen) Update(msg tea.Msg) (SetupScreen, tea.Cmd) {
 			case "enter":
 				s.setFieldValue(s.editing, s.input.Value())
 				s.app.PersistConfig()
-				p, _ := discover.Resolve(".",
-					s.app.Cfg.KernelDir, s.app.Cfg.ClangDir, s.app.Cfg.AnyKernelDir, s.app.Cfg.OutputDir)
-				s.app.Paths = p
+				s.rescan()
 				s.app.Toast = fieldLabel(s.editing) + " saved."
 				s.app.ToastErr = false
 				s.editing = 0
@@ -127,17 +165,43 @@ func (s SetupScreen) Update(msg tea.Msg) (SetupScreen, tea.Cmd) {
 	}
 	switch m := msg.(type) {
 	case tea.KeyMsg:
+		fields := s.fields()
 		switch strings.ToLower(m.String()) {
+		case "up", "k":
+			if s.cursor > 0 {
+				s.cursor--
+			}
+			return s, nil
+		case "down", "j":
+			if s.cursor < len(fields)-1 {
+				s.cursor++
+			}
+			return s, nil
+		case "enter", " ":
+			if s.cursor >= 0 && s.cursor < len(fields) {
+				f := fields[s.cursor]
+				s.editing = f
+				v := s.fieldValue(f)
+				if v == "" {
+					v = s.resolvedValue(f)
+				}
+				s.input.SetValue(v)
+				s.input.Focus()
+				return s, textinput.Blink
+			}
 		case "r":
-			p, _ := discover.Resolve(".",
-				s.app.Cfg.KernelDir, s.app.Cfg.ClangDir, s.app.Cfg.AnyKernelDir, s.app.Cfg.OutputDir)
-			s.app.Paths = p
+			s.rescan()
 			s.app.Toast = "Paths re-scanned."
 			s.app.ToastErr = false
 		case "1", "2", "3", "4", "5", "6":
 			f := pathField(m.String()[0] - '0')
+			s.cursor = int(f) - 1
 			s.editing = f
-			s.input.SetValue(s.fieldValue(f))
+			v := s.fieldValue(f)
+			if v == "" {
+				v = s.resolvedValue(f)
+			}
+			s.input.SetValue(v)
 			s.input.Focus()
 			return s, textinput.Blink
 		}
@@ -147,6 +211,7 @@ func (s SetupScreen) Update(msg tea.Msg) (SetupScreen, tea.Cmd) {
 
 func (s SetupScreen) View() string {
 	w := panelWidth(s.app.Width)
+	innerW := innerContentWidth(w)
 
 	banner := components.Banner(
 		"SETUP  ·  PATHS",
@@ -160,12 +225,19 @@ func (s SetupScreen) View() string {
 		bad               bool
 	}
 	rows := []row{
-		{"1", "Kernel       ", okOr(s.app.Paths.Kernel, "(not found)"), s.app.Paths.Kernel == ""},
-		{"2", "Clang        ", okOr(s.app.Paths.Clang, "(not found)"), s.app.Paths.Clang == ""},
-		{"3", "AnyKernel3   ", okOr(s.app.Paths.AnyKernel, "(not found)"), s.app.Paths.AnyKernel == ""},
-		{"4", "Output       ", okOr(s.app.Paths.Output, "(unset)"), s.app.Paths.Output == ""},
-		{"5", "aarch64-gcc  ", okOr(s.app.Paths.GccArm64, "(not found)"), s.app.Paths.GccArm64 == ""},
-		{"6", "arm-gcc      ", okOr(s.app.Paths.GccArm, "(not found)"), s.app.Paths.GccArm == ""},
+		{"1", "Kernel    ", okOr(s.app.Paths.Kernel, defaultOr(s.app.Cfg.KernelDir, "(not found)")), s.app.Paths.Kernel == ""},
+		{"2", "Clang     ", okOr(s.app.Paths.Clang, defaultOr(s.app.Cfg.ClangDir, "(not found)")), s.app.Paths.Clang == ""},
+		{"3", "AnyKernel3", okOr(s.app.Paths.AnyKernel, defaultOr(s.app.Cfg.AnyKernelDir, "(not found)")), s.app.Paths.AnyKernel == ""},
+		{"4", "Output    ", okOr(s.app.Paths.Output, defaultOr(s.app.Cfg.OutputDir, "(unset)")), s.app.Paths.Output == ""},
+		{"5", "aarch64-gcc", okOr(s.app.Paths.GccArm64, defaultOr(s.app.Cfg.GCC64Dir, "(not found)")), s.app.Paths.GccArm64 == ""},
+		{"6", "arm-gcc   ", okOr(s.app.Paths.GccArm, defaultOr(s.app.Cfg.GCC32Dir, "(not found)")), s.app.Paths.GccArm == ""},
+	}
+	// label column width = max(label) + tag (4) + separators
+	labelW := 12
+	prefixW := 4 /*"  [N]"*/ + 2 + labelW + 2 // marker + tag + space + label + " : "
+	valWrap := innerW - prefixW
+	if valWrap < 16 {
+		valWrap = 16
 	}
 	var p strings.Builder
 	for i, r := range rows {
@@ -173,8 +245,20 @@ func (s SetupScreen) View() string {
 		if r.bad {
 			v = ErrText
 		}
+		// Cursor marker: chevron when hovered, otherwise blank.
+		mark := "  "
+		if i == s.cursor {
+			mark = AccentText.Render(" ›")
+		}
 		tag := components.BracketTag(r.key, 1, HotKeyStyle)
-		p.WriteString("  " + tag + "  " + LabelStyle.Render(r.label) + "  " + v.Render(r.value))
+		// Wrap long values with continuation indent under the value column.
+		valLines := wrapValue(r.value, valWrap)
+		head := mark + " " + tag + " " + LabelStyle.Render(padRight(r.label, labelW)) + LabelStyle.Render(" : ") + v.Render(valLines[0])
+		p.WriteString(head)
+		indent := strings.Repeat(" ", prefixW)
+		for _, l := range valLines[1:] {
+			p.WriteString("\n" + indent + v.Render(l))
+		}
 		if i < len(rows)-1 {
 			p.WriteString("\n")
 		}
@@ -187,7 +271,8 @@ func (s SetupScreen) View() string {
 		var b strings.Builder
 		b.WriteString(LabelStyle.Render("Editing: ") + ValueStyle.Render(fieldLabel(s.editing)) + "\n")
 		b.WriteString(s.input.View())
-		editorPanel = components.Panel("Edit path", b.String(), w, PanelWarn, lipgloss.NewStyle().Foreground(ColorWarn).Bold(true)) + "\n"
+		editorPanel = components.Panel("Edit path", b.String(), w, PanelWarn,
+			lipgloss.NewStyle().Foreground(ColorWarn).Bold(true)) + "\n"
 	}
 
 	// ── Install hints panel (distro-aware) ──────────────────────────────────
@@ -196,34 +281,94 @@ func (s SetupScreen) View() string {
 		var h strings.Builder
 		hints := installHints(s.app.Paths)
 		for i, line := range hints {
-			h.WriteString("  " + AccentText.Render("$ ") + ValueStyle.Render(line))
+			lines := wrapValue(line, innerW-4)
+			h.WriteString("  " + AccentText.Render("$ ") + ValueStyle.Render(lines[0]))
+			for _, l := range lines[1:] {
+				h.WriteString("\n    " + ValueStyle.Render(l))
+			}
 			if i < len(hints)-1 {
 				h.WriteString("\n")
 			}
 		}
-		hintsPanel = components.Panel("Install hints ("+string(s.app.Paths.Distro)+")", h.String(), w, PanelBorder, TitleStyle) + "\n"
+		hintsPanel = components.Panel("Install hints ("+string(s.app.Paths.Distro)+")", h.String(),
+			w, PanelBorder, TitleStyle) + "\n"
 	}
 
 	var actions string
 	if s.editing != 0 {
-		actions = components.HotkeyStrip([]components.Hotkey{
+		actions = components.HotkeyStripWrap([]components.Hotkey{
 			{Key: "Enter", Desc: "Save"},
 			{Key: "ESC", Desc: "Cancel"},
-		}, HotKeyStyle, ValueStyle, DimText, MutedText)
+		}, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
 	} else {
-		actions = components.HotkeyStrip([]components.Hotkey{
+		actions = components.HotkeyStripWrap([]components.Hotkey{
 			{Key: "1-6", Desc: "Edit", Sub: "path slot"},
+			{Key: "↑/↓", Desc: "Navigate"},
+			{Key: "Enter", Desc: "Edit selected"},
 			{Key: "R", Desc: "Re-scan"},
 			{Key: "ESC", Desc: "Back"},
-		}, HotKeyStyle, ValueStyle, DimText, MutedText)
+		}, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
 	}
 
-	divider := "  " + components.Separator(innerContentWidth(w), MutedText) + "\n"
+	divider := components.Separator(w, MutedText) + "\n"
 	out := banner + "\n" + pathsPanel + "\n" + editorPanel + hintsPanel + divider + "  " + actions + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}
 	return out
+}
+
+// wrapValue is a thin wrapper over components.wrapPlain that's exposed for
+// callers in this file. Keeps long path values on a single line until they
+// exceed `width`, then breaks on path separators preferentially.
+func wrapValue(s string, width int) []string {
+	if width <= 0 || len(s) <= width {
+		return []string{s}
+	}
+	return wrapPlainPaths(s, width)
+}
+
+// wrapPlainPaths breaks s at /, space, or hyphen boundaries near the width
+// limit; falls back to a hard cut.
+func wrapPlainPaths(s string, width int) []string {
+	var lines []string
+	for len(s) > width {
+		cut := width
+		for i := width; i > width/2 && i < len(s); i-- {
+			c := s[i]
+			if c == '/' || c == ' ' || c == '-' || c == '_' {
+				cut = i + 1
+				break
+			}
+		}
+		if cut > len(s) {
+			cut = len(s)
+		}
+		lines = append(lines, s[:cut])
+		s = s[cut:]
+	}
+	if s != "" {
+		lines = append(lines, s)
+	}
+	return lines
+}
+
+// padRight right-pads s to the given visual width with spaces.
+func padRight(s string, width int) string {
+	if len(s) >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-len(s))
+}
+
+// defaultOr returns d when d is non-empty, otherwise alt. Used to surface
+// the *configured default* when discovery fails so the user sees what the
+// builder is going to try, instead of "(not found)" alone.
+func defaultOr(d, alt string) string {
+	if d == "" {
+		return alt
+	}
+	return d
 }
 
 func installHints(p discover.Paths) []string {

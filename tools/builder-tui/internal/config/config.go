@@ -51,13 +51,55 @@ type Config struct {
 }
 
 // Defaults returns a sensible starting Config.
+//
+// Path defaults mirror the original bash build.sh:
+//
+//	kernel_dir = $HOME/kernel-builds/vayu_a16_kernel
+//	CLANG_DIR  = $kernel_dir/clang
+//	anykernel  = $kernel_dir/AnyKernel3
+//	OUTPUT_DIR = $kernel_dir/Anykernel-Builds
+//	GCC64_DIR  = /usr/bin
+//	GCC32_DIR  = /usr/bin
+//
+// These are starting hints — autodiscovery (internal/discover) still wins
+// when a real kernel tree is detected near $cwd. The hints become useful
+// when the user is running the TUI from outside any kernel tree (first run).
 func Defaults() Config {
+	home, _ := os.UserHomeDir()
+	root := filepath.Join(home, "kernel-builds", "vayu_a16_kernel")
 	return Config{
+		KernelDir:    root,
+		ClangDir:     filepath.Join(root, "clang"),
+		AnyKernelDir: filepath.Join(root, "AnyKernel3"),
+		OutputDir:    filepath.Join(root, "Anykernel-Builds"),
+		GCC64Dir:     "/usr/bin",
+		GCC32Dir:     "/usr/bin",
+
 		ClangSource:  ClangAuto,
 		ZyCTarget:    "latest",
 		GoogleTarget: "latest",
 		KSUBranch:    "main",
 	}
+}
+
+// ExpandTilde rewrites a leading "~" or "~user" prefix to an absolute path.
+// Used by Setup paths so the user can type "~/foo" and have it persist as
+// /home/user/foo for downstream consumers.
+func ExpandTilde(p string) string {
+	if p == "" || p[0] != '~' {
+		return p
+	}
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return p
+		}
+		if p == "~" {
+			return home
+		}
+		return filepath.Join(home, p[2:])
+	}
+	return p
 }
 
 // Path returns the config file path, creating its directory if missing.
