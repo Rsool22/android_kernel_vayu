@@ -598,11 +598,11 @@ func (s BuildScreen) renderCancelSummary(inner int) string {
 
 func (s BuildScreen) renderActions() string {
 	if s.running {
-		return components.HotkeyStrip([]components.Hotkey{
+		return components.HotkeyStripWrap([]components.Hotkey{
 			{Key: "Ctrl+C", Desc: "Cancel"},
 			{Key: "↑/↓", Desc: "Scroll"},
 			{Key: "ESC", Desc: "Main"},
-		}, HotKeyStyle, ValueStyle, DimText, MutedText)
+		}, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
 	}
 	if s.postBuild {
 		items := []components.Hotkey{
@@ -619,12 +619,12 @@ func (s BuildScreen) renderActions() string {
 			components.Hotkey{Key: "R", Desc: "Return to main"},
 			components.Hotkey{Key: "E", Desc: "Exit"},
 		)
-		return components.HotkeyStrip(items, HotKeyStyle, ValueStyle, DimText, MutedText)
+		return components.HotkeyStripWrap(items, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
 	}
-	return components.HotkeyStrip([]components.Hotkey{
+	return components.HotkeyStripWrap([]components.Hotkey{
 		{Key: "B", Desc: "Build", Sub: "configure → compile → package"},
 		{Key: "ESC", Desc: "Back"},
-	}, HotKeyStyle, ValueStyle, DimText, MutedText)
+	}, stripWidth(s.app.Width), HotKeyStyle, ValueStyle, DimText, MutedText)
 }
 
 // truncate returns s clipped to maxRunes with an ellipsis when needed.
