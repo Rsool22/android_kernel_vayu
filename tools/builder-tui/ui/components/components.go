@@ -21,7 +21,11 @@ func Banner(title, subtitle string, width int, border lipgloss.Style, titleStyle
 	if width < 20 {
 		width = 20
 	}
-	inner := width - 2 // border occupies 2 columns; no extra padding
+	// Lipgloss adds 2 border + 2 horizontal padding columns when the
+	// caller's style sets Padding(0, 1) (BannerBorder/PanelBorder do).
+	// We size the inner block to width - 4 so the rendered box is
+	// exactly `width` columns wide.
+	inner := width - 4
 	if inner < 8 {
 		inner = 8
 	}
@@ -38,22 +42,56 @@ func Banner(title, subtitle string, width int, border lipgloss.Style, titleStyle
 // Panel renders a cyan double-bordered panel with an optional centered title
 // row at the top. body is rendered as-is (already styled by the caller).
 //
-// width is the *outer* width.
+// width is the *outer* width. The panel borders are drawn manually (rather
+// than via lipgloss.Style.Border) so the title divider can use the proper
+// double-border intersection runes ╠ and ╣ — matching the bash original's
+// box_div output where the divider visually fuses with the side borders.
 func Panel(title, body string, width int, border lipgloss.Style, titleStyle lipgloss.Style) string {
 	if width < 12 {
 		width = 12
 	}
+	// 2 columns for the side borders, 2 for the 1-column horizontal
+	// padding kept on each side so body text doesn't hug the borders.
 	inner := width - 2
-	if inner < 4 {
-		inner = 4
+	if inner < 6 {
+		inner = 6
 	}
+	pad := 1
+	contentW := inner - 2*pad
+
+	color := border.GetBorderTopForeground()
+	sideStyle := lipgloss.NewStyle().Foreground(color)
+	side := sideStyle.Render("║")
+
+	bar := strings.Repeat("═", inner)
+	top := sideStyle.Render("╔" + bar + "╗")
+	bot := sideStyle.Render("╚" + bar + "╝")
+	div := sideStyle.Render("╠" + bar + "╣")
+	leftPad := strings.Repeat(" ", pad)
+	rightPad := strings.Repeat(" ", pad)
+
+	wrapRow := func(row string) string {
+		rw := lipgloss.Width(row)
+		fill := contentW - rw
+		if fill < 0 {
+			row = truncate(row, contentW)
+			fill = 0
+		}
+		return side + leftPad + row + strings.Repeat(" ", fill) + rightPad + side
+	}
+
+	var lines []string
+	lines = append(lines, top)
 	if title != "" {
-		head := lipgloss.PlaceHorizontal(inner, lipgloss.Center,
-			titleStyle.Render(strings.ToUpper(truncate(title, inner))))
-		div := lipgloss.NewStyle().Foreground(border.GetBorderTopForeground()).Render(strings.Repeat("─", inner))
-		body = head + "\n" + div + "\n" + body
+		t := lipgloss.PlaceHorizontal(contentW, lipgloss.Center,
+			titleStyle.Render(strings.ToUpper(truncate(title, contentW))))
+		lines = append(lines, wrapRow(t), div)
 	}
-	return border.Width(inner).Render(body)
+	for _, row := range strings.Split(body, "\n") {
+		lines = append(lines, wrapRow(row))
+	}
+	lines = append(lines, bot)
+	return strings.Join(lines, "\n")
 }
 
 // KV renders a left-aligned key/value row used inside panels.

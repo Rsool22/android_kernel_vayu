@@ -324,11 +324,11 @@ func panelWidth(termWidth int) int {
 }
 
 // innerContentWidth is the visible content area inside a panel, i.e. the
-// width passed to lipgloss.Style.Width by components.Panel. Used by callers
-// that need to size MenuRow leaders, KV padding, separators, etc. so they
-// align with the inner box width.
+// number of columns available for body text after lipgloss subtracts both
+// borders (2) and the horizontal padding (2 — one column on each side).
+// Used by callers that need to size MenuRow leaders, KV padding, etc.
 func innerContentWidth(outerWidth int) int {
-	w := outerWidth - 2
+	w := outerWidth - 4
 	if w < 8 {
 		w = 8
 	}
