@@ -1,0 +1,3 @@
+# Compiled vayu-builder binaries (built locally / in CI; never committed).
+/vayu-builder
+/vayu-builder-*

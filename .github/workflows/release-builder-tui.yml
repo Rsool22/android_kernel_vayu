@@ -1,0 +1,146 @@
+# release-builder-tui.yml -- builds and publishes the vayu-builder binary
+# for linux-amd64 and linux-arm64. Runs:
+#   • on push to 16-ReSukiSU when tools/builder-tui changes (publishes a
+#     "tui-latest" rolling release that build.sh resolves at first run);
+#   • on pushes of tags matching tui-v* (cuts a versioned release).
+#   • manually via workflow_dispatch.
+name: release-builder-tui
+
+on:
+  push:
+    branches: [16-ReSukiSU]
+    paths: ["tools/builder-tui/**", ".github/workflows/release-builder-tui.yml"]
+    tags:   ["tui-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-builder-tui-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build (${{ matrix.os }}-${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            goos: linux
+            goarch: amd64
+          - os: linux
+            arch: arm64
+            goos: linux
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache-dependency-path: tools/builder-tui/go.sum
+
+      - name: Determine version
+        id: ver
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/tui-v* ]]; then
+              echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+              echo "release_tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+              short=$(git rev-parse --short HEAD)
+              echo "tag=tui-${short}" >> "$GITHUB_OUTPUT"
+              echo "release_tag=tui-latest" >> "$GITHUB_OUTPUT"
+          fi
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Build vayu-builder
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          cd tools/builder-tui
+          out="vayu-builder-${{ matrix.os }}-${{ matrix.arch }}"
+          ldflags="-s -w \
+            -X github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/version.Version=${{ steps.ver.outputs.tag }} \
+            -X github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/version.Commit=${{ steps.ver.outputs.commit }} \
+            -X github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/version.Date=${{ steps.ver.outputs.date }}"
+          go build -trimpath -ldflags "$ldflags" -o "$out" .
+          chmod +x "$out"
+          mv "$out" "../../$out"
+
+      - name: Smoke test
+        if: matrix.goarch == 'amd64'
+        run: |
+          ./vayu-builder-${{ matrix.os }}-${{ matrix.arch }} version
+          ./vayu-builder-${{ matrix.os }}-${{ matrix.arch }} probe || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vayu-builder-${{ matrix.os }}-${{ matrix.arch }}
+          path: vayu-builder-${{ matrix.os }}-${{ matrix.arch }}
+          retention-days: 7
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Determine release tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/tui-v* ]]; then
+              tag="${GITHUB_REF#refs/tags/}"
+              prerelease=false
+          else
+              tag="tui-latest"
+              prerelease=true
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "files:"; ls -la dist/
+
+      - name: Delete previous tui-latest release (rolling)
+        if: steps.tag.outputs.tag == 'tui-latest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release delete tui-latest --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          NOTES="vayu-builder TUI ${{ steps.tag.outputs.tag }}"$'\n\n'"Built from $(git rev-parse --short HEAD)."
+          if [[ "${{ steps.tag.outputs.prerelease }}" == "true" ]]; then
+              gh release create "${{ steps.tag.outputs.tag }}" \
+                  --repo "$GITHUB_REPOSITORY" \
+                  --title "vayu-builder TUI (rolling)" \
+                  --notes "$NOTES" \
+                  --prerelease \
+                  --target "$GITHUB_SHA" \
+                  dist/*
+          else
+              gh release create "${{ steps.tag.outputs.tag }}" \
+                  --repo "$GITHUB_REPOSITORY" \
+                  --title "vayu-builder TUI ${{ steps.tag.outputs.tag }}" \
+                  --notes "$NOTES" \
+                  dist/*
+          fi

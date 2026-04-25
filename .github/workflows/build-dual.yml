@@ -1,0 +1,348 @@
+# build-dual.yml -- builds the vayu kernel for both ReSukiSU branches in
+# parallel, gracefully skipping any branch that has been removed upstream.
+#
+# Pipeline:
+#   reset-counter (manual only) -> probe -> build (matrix main/dev) -> release
+#
+# Robustness goals (see the project README "CI" section):
+#   • Never produce an empty release. If both ReSukiSU branches are
+#     unavailable, the entire workflow short-circuits with no release.
+#   • Differentiate "branch deleted" (skip leg) from "network failure"
+#     (fail loudly) -- handled by the `vayu-builder probe` exit codes.
+#   • Use Google AOSP clang as the primary toolchain; fall back to ZyC if
+#     gitiles is unreachable. Driven entirely by the binary's --source=auto.
+
+name: Build · vayu Android 16 (ReSukiSU dual-branch)
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Reason for manual trigger"
+        required: false
+        default: "Manual trigger"
+      reset_counter:
+        description: "Reset the build number counter back to #1"
+        required: false
+        type: boolean
+        default: false
+      force_build:
+        description: "Build even if no upstream ReSukiSU changes"
+        required: false
+        type: boolean
+        default: false
+      clang_source:
+        description: "Clang source: auto | google | zyc"
+        required: false
+        default: "auto"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-vayu-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  reset-counter:
+    name: Reset build counter
+    if: github.event_name == 'workflow_dispatch' && inputs.reset_counter == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 1
+
+      - name: Write offset file and push
+        run: |
+          set -euo pipefail
+          OFFSET=$(( ${{ github.run_number }} - 1 ))
+          echo "${OFFSET}" > .build_counter_offset
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .build_counter_offset
+          if git diff --cached --quiet; then
+              echo "[ci] no change needed"
+          else
+              git commit -m "ci: reset build counter (offset=${OFFSET}) [skip ci]"
+              git push
+          fi
+
+  # Pre-flight branch probe. Calls `vayu-builder probe --json` so we share the
+  # exact same upstream-detection logic between local TUI and CI.
+  probe:
+    name: Probe ReSukiSU branches
+    needs: reset-counter
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      main_available: ${{ steps.probe.outputs.main_available }}
+      dev_available:  ${{ steps.probe.outputs.dev_available  }}
+      main_sha:       ${{ steps.probe.outputs.main_sha       }}
+      dev_sha:        ${{ steps.probe.outputs.dev_sha        }}
+      should_build:   ${{ steps.compare.outputs.should_build }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache-dependency-path: tools/builder-tui/go.sum
+
+      - name: Build vayu-builder
+        run: |
+          set -euo pipefail
+          mkdir -p bin
+          (cd tools/builder-tui && go build -trimpath -o "$GITHUB_WORKSPACE/bin/vayu-builder" .)
+          ./bin/vayu-builder version
+
+      - name: Probe upstream
+        id: probe
+        run: |
+          set -euo pipefail
+          set +e
+          OUTPUT=$(./bin/vayu-builder probe --json)
+          rc=$?
+          set -e
+          echo "$OUTPUT" | tee probe.json
+          if [ "$rc" -eq 3 ]; then
+              echo "::error::ReSukiSU upstream unreachable -- aborting"
+              exit 1
+          fi
+          main_state=$(jq -r '.main.state' probe.json)
+          dev_state=$(jq  -r '.dev.state'  probe.json)
+          main_sha=$(jq   -r '.main.sha   // empty' probe.json)
+          dev_sha=$(jq    -r '.dev.sha    // empty' probe.json)
+          if [ "$main_state" = "present" ]; then
+              echo "main_available=true"  >> "$GITHUB_OUTPUT"
+          else
+              echo "main_available=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$dev_state" = "present" ]; then
+              echo "dev_available=true"  >> "$GITHUB_OUTPUT"
+          else
+              echo "dev_available=false" >> "$GITHUB_OUTPUT"
+          fi
+          {
+              echo "main_sha=${main_sha}"
+              echo "dev_sha=${dev_sha}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Restore last-build SHA cache
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .last_ksu_shas
+          key: ksu-dual-${{ steps.probe.outputs.main_sha }}-${{ steps.probe.outputs.dev_sha }}
+          restore-keys: ksu-dual-
+
+      - name: Decide whether to build
+        id: compare
+        run: |
+          set -euo pipefail
+          MA="${{ steps.probe.outputs.main_available }}"
+          DA="${{ steps.probe.outputs.dev_available }}"
+          if [ "$MA" != "true" ] && [ "$DA" != "true" ]; then
+              echo "::warning::Both ReSukiSU branches unavailable -- skipping build."
+              echo "should_build=false" >> "$GITHUB_OUTPUT"
+              exit 0
+          fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              echo "should_build=true" >> "$GITHUB_OUTPUT"
+              exit 0
+          fi
+          if [ "${{ steps.cache.outputs.cache-hit }}" = "true" ]; then
+              echo "[ci] no upstream changes -- skipping"
+              echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+              echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build [${{ matrix.ksu_branch }}]
+    needs: probe
+    if: needs.probe.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    strategy:
+      fail-fast: false
+      matrix:
+        ksu_branch: [main, dev]
+
+    env:
+      KSU_BRANCH: ${{ matrix.ksu_branch }}
+      KSU_BRANCH_AVAILABLE: ${{ matrix.ksu_branch == 'main' && needs.probe.outputs.main_available || needs.probe.outputs.dev_available }}
+      CCACHE_DIR: /home/runner/.ccache
+      CCACHE_COMPRESS: "1"
+      CCACHE_MAXSIZE: "10G"
+      CLANG_SOURCE: ${{ inputs.clang_source || 'auto' }}
+
+    steps:
+      - name: Skip if branch unavailable
+        if: env.KSU_BRANCH_AVAILABLE != 'true'
+        run: |
+          echo "::warning title=Branch unavailable::ReSukiSU '${KSU_BRANCH}' is not available upstream -- skipping this leg."
+
+      - uses: actions/checkout@v4
+        if: env.KSU_BRANCH_AVAILABLE == 'true'
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        if: env.KSU_BRANCH_AVAILABLE == 'true'
+        with:
+          go-version: "1.23.x"
+          cache-dependency-path: tools/builder-tui/go.sum
+
+      - name: Build vayu-builder
+        if: env.KSU_BRANCH_AVAILABLE == 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p bin
+          (cd tools/builder-tui && go build -trimpath -o "$GITHUB_WORKSPACE/bin/vayu-builder" .)
+          ./bin/vayu-builder version
+
+      - name: Install host deps
+        if: env.KSU_BRANCH_AVAILABLE == 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            git ccache make bc bison flex zip unzip rsync python3 build-essential \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev jq
+
+      - name: Restore ccache
+        if: env.KSU_BRANCH_AVAILABLE == 'true'
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-${{ matrix.ksu_branch }}-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ matrix.ksu_branch }}-${{ runner.os }}-
+
+      - name: Fetch clang
+        if: env.KSU_BRANCH_AVAILABLE == 'true'
+        run: |
+          set -euo pipefail
+          .github/scripts/fetch_clang.sh --source "${CLANG_SOURCE}" --into "$GITHUB_WORKSPACE/clang"
+          find "$GITHUB_WORKSPACE/clang/bin/" -maxdepth 1 -type f | head
+
+      - name: Install ReSukiSU
+        if: env.KSU_BRANCH_AVAILABLE == 'true'
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/${KSU_BRANCH}/kernel/setup.sh" \
+            | bash -s "${KSU_BRANCH}"
+
+      - name: Build kernel + package zip
+        if: env.KSU_BRANCH_AVAILABLE == 'true'
+        env:
+          KSU_BRANCH_AVAILABLE: ${{ env.KSU_BRANCH_AVAILABLE }}
+        run: .github/scripts/ci_build.sh
+
+      - name: Upload kernel zip
+        if: env.KSU_BRANCH_AVAILABLE == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ matrix.ksu_branch }}
+          path: ${{ env.ZIP_PATH }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Save last-built SHA marker
+        if: env.KSU_BRANCH_AVAILABLE == 'true'
+        run: |
+          mkdir -p .last_ksu_shas
+          echo "${{ matrix.ksu_branch == 'main' && needs.probe.outputs.main_sha || needs.probe.outputs.dev_sha }}" \
+            > ".last_ksu_shas/${{ matrix.ksu_branch }}.sha"
+
+  release:
+    name: Publish rolling release
+    needs: [probe, build]
+    if: needs.probe.outputs.should_build == 'true' && (needs.probe.outputs.main_available == 'true' || needs.probe.outputs.dev_available == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: false
+
+      - name: Inspect artifacts
+        id: inspect
+        run: |
+          set -euo pipefail
+          ls -la dist || true
+          have_main=false
+          have_dev=false
+          [ -d dist/kernel-main ] && have_main=true
+          [ -d dist/kernel-dev  ] && have_dev=true
+          {
+              echo "have_main=${have_main}"
+              echo "have_dev=${have_dev}"
+          } >> "$GITHUB_OUTPUT"
+          if ! $have_main && ! $have_dev; then
+              echo "::error::No kernel zips were produced -- skipping release"
+              exit 1
+          fi
+          mkdir -p release-assets
+          [ -d dist/kernel-main ] && cp dist/kernel-main/* release-assets/
+          [ -d dist/kernel-dev  ] && cp dist/kernel-dev/*  release-assets/
+          ls -la release-assets/
+
+      - name: Compose release notes
+        id: notes
+        run: |
+          set -euo pipefail
+          {
+              echo "Vayu Android 16 kernel — automated rolling build"
+              echo
+              echo "Build: #${{ github.run_number }}"
+              echo "Commit: ${{ github.sha }}"
+              echo
+              echo "## Variants in this release"
+              if [ "${{ steps.inspect.outputs.have_main }}" = "true" ]; then
+                  echo "- **main** branch — included"
+              else
+                  echo "- main branch — _skipped_ (upstream unavailable)"
+              fi
+              if [ "${{ steps.inspect.outputs.have_dev }}" = "true" ]; then
+                  echo "- **dev** branch — included"
+              else
+                  echo "- dev branch — _skipped_ (upstream unavailable)"
+              fi
+              echo
+              echo "Built with vayu-builder TUI; clang source: \`${{ inputs.clang_source || 'auto' }}\`."
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Publish rolling release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="rolling-build-${{ github.run_number }}"
+          gh release delete rolling-build --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
+          gh release create rolling-build \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Vayu kernel · build #${{ github.run_number }}" \
+              --notes-file release-notes.md \
+              --target "$GITHUB_SHA" \
+              --prerelease \
+              release-assets/*
+          # Also publish a numbered tag so previous builds remain reachable.
+          gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Vayu kernel · build #${{ github.run_number }}" \
+              --notes-file release-notes.md \
+              --target "$GITHUB_SHA" \
+              release-assets/* || true

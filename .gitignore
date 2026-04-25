@@ -150,3 +150,7 @@ out/
 .menuconfig_saved_config
 .build_number
 .scmversion
+
+# vayu-builder: don't ignore .github (kernel default ignores dot-prefixed paths)
+!.github
+!.github/**
