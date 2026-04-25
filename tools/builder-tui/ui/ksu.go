@@ -2,11 +2,16 @@ package ui
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/features"
+	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/pipeline"
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/internal/resukisu"
 	"github.com/Rsool22/android_kernel_vayu/tools/builder-tui/ui/components"
 )
@@ -30,6 +35,17 @@ type ksuProbedMsg struct{ main, dev resukisu.Probe }
 type ksuActionDoneMsg struct {
 	stage string
 	err   error
+}
+type ksuGuardDoneMsg struct {
+	report pipeline.GuardReport
+	err    error
+}
+type ksuRemoveDoneMsg struct {
+	rc       int
+	cFiles   int
+	err      error
+	dirGone  bool
+	guardRep pipeline.GuardReport
 }
 
 func (s KSUScreen) probeCmd() tea.Cmd {
@@ -80,18 +96,122 @@ func (s KSUScreen) Update(msg tea.Msg) (KSUScreen, tea.Cmd) {
 			s.app.PersistConfig()
 		case "i", "u":
 			selected := s.app.Cfg.KSUBranch
-			state := s.branchState(selected)
-			if state != resukisu.StatePresent {
-				s.app.Toast = "Cannot install: " + selected + " branch is " + string(state)
+			brstate := s.branchState(selected)
+			if brstate != resukisu.StatePresent {
+				s.app.Toast = "Cannot install: " + selected + " branch is " + string(brstate)
 				s.app.ToastErr = true
 				return s, nil
 			}
 			s.busy = true
 			s.stage = "installing " + selected
 			return s, s.installCmd(selected)
+		case "v":
+			s.busy = true
+			s.stage = "verifying KSU hook guards"
+			return s, s.guardCmd()
+		case "x":
+			s.busy = true
+			s.stage = "removing driver (setup.sh --cleanup)"
+			return s, s.removeCmd()
 		}
+	case ksuGuardDoneMsg:
+		s.busy = false
+		s.stage = ""
+		if m.err != nil {
+			s.app.Toast = "Guards: " + m.err.Error()
+			s.app.ToastErr = true
+		} else if m.report.Summary != "" {
+			s.app.Toast = "Guards: " + m.report.Summary
+			s.app.ToastErr = m.report.HasFixes()
+		} else {
+			s.app.Toast = "Guards verified"
+			s.app.ToastErr = false
+		}
+		return s, nil
+	case ksuRemoveDoneMsg:
+		s.busy = false
+		s.stage = ""
+		if m.err != nil {
+			s.app.Toast = "Remove failed: " + m.err.Error()
+			s.app.ToastErr = true
+			return s, nil
+		}
+		if m.rc == 0 && m.dirGone {
+			s.disableKSUInDefconfig()
+			s.app.Builder.ForceCleanReason = "Driver removed"
+			s.app.Builder.Incremental = false
+			_ = s.app.Builder.Save(s.app.Paths.Kernel)
+			s.app.Toast = "Driver removed -- defconfig reset"
+			s.app.ToastErr = false
+		} else {
+			s.app.Toast = "Cleanup failed or driver already gone (exit " + itoa(m.rc) + ")"
+			s.app.ToastErr = true
+		}
+		return s, nil
 	}
 	return s, nil
+}
+
+// disableKSUInDefconfig sets CONFIG_KSU/SUSFS/MANUAL_HOOK/KPM all to "is not
+// set" in arch/arm64/configs/vayu_defconfig (mirrors bash post-removal).
+func (s KSUScreen) disableKSUInDefconfig() {
+	if s.app.Paths.Kernel == "" {
+		return
+	}
+	dc := filepath.Join(s.app.Paths.Kernel, "arch", "arm64", "configs", "vayu_defconfig")
+	st, err := features.Read(dc)
+	if err != nil {
+		return
+	}
+	st.KSU = false
+	st.SUSFS = false
+	st.KPM = false
+	st.ManualHook = false
+	_ = features.Apply(dc, st)
+}
+
+// guardCmd runs apply_ksu_guards.py and parses the output.
+func (s KSUScreen) guardCmd() tea.Cmd {
+	return func() tea.Msg {
+		guardPath := filepath.Join(s.app.Paths.Kernel, "scripts", "apply_ksu_guards.py")
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "python3", guardPath)
+		cmd.Dir = s.app.Paths.Kernel
+		cmd.Env = append(cmd.Env, "TERM_W=9999", "KERNEL_DIR="+s.app.Paths.Kernel)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return ksuGuardDoneMsg{err: err}
+		}
+		return ksuGuardDoneMsg{report: pipeline.ParseGuardReport(string(out))}
+	}
+}
+
+// removeCmd runs setup.sh --cleanup and verifies driver removal.
+func (s KSUScreen) removeCmd() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		rc, _, err := resukisu.Cleanup(ctx, s.app.Paths.Kernel, s.app.Paths.Output, nil)
+		if err != nil {
+			return ksuRemoveDoneMsg{rc: rc, err: err}
+		}
+		ksuDir := filepath.Join(s.app.Paths.Kernel, "drivers", "kernelsu")
+		gone := !pathExists(ksuDir)
+		// Run guard verification post-removal (expect mostly skips).
+		var rep pipeline.GuardReport
+		guardPath := filepath.Join(s.app.Paths.Kernel, "scripts", "apply_ksu_guards.py")
+		if pathExists(guardPath) {
+			gctx, gcancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer gcancel()
+			gc := exec.CommandContext(gctx, "python3", guardPath)
+			gc.Dir = s.app.Paths.Kernel
+			gc.Env = append(gc.Env, "TERM_W=9999", "KERNEL_DIR="+s.app.Paths.Kernel)
+			out, _ := gc.CombinedOutput()
+			rep = pipeline.ParseGuardReport(string(out))
+		}
+		return ksuRemoveDoneMsg{rc: rc, dirGone: gone, guardRep: rep}
+	}
 }
 
 func (s KSUScreen) branchState(b string) resukisu.State {
@@ -141,7 +261,9 @@ func (s KSUScreen) View() string {
 	actions := components.HotkeyStrip([]components.Hotkey{
 		{Key: "I", Desc: "Install / update", Sub: "from active branch"},
 		{Key: "S", Desc: "Switch", Sub: "main ↔ dev"},
-		{Key: "P", Desc: "Re-probe", Sub: "git ls-remote"},
+		{Key: "V", Desc: "Verify guards"},
+		{Key: "X", Desc: "Remove driver"},
+		{Key: "P", Desc: "Re-probe"},
 		{Key: "ESC", Desc: "Back"},
 	}, HotKeyStyle, ValueStyle, DimText, MutedText)
 
@@ -155,6 +277,35 @@ func (s KSUScreen) View() string {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}
 	return out
+}
+
+// pathExists returns true when p exists (file or dir).
+func pathExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// itoa returns the decimal string representation of i.
+func itoa(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	neg := i < 0
+	if neg {
+		i = -i
+	}
+	var buf [20]byte
+	pos := len(buf)
+	for i > 0 {
+		pos--
+		buf[pos] = byte('0' + i%10)
+		i /= 10
+	}
+	if neg {
+		pos--
+		buf[pos] = '-'
+	}
+	return string(buf[pos:])
 }
 
 // padTo right-pads a string with spaces to a fixed visible width.

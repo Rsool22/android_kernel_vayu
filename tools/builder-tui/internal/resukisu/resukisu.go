@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -136,6 +137,94 @@ func dirHasGit(d string) bool {
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	return cmd.Run() == nil
+}
+
+// Cleanup runs ReSukiSU's official setup.sh --cleanup, then sweeps any
+// stale kernelsu artefacts the script may not delete (KernelSU/ clone,
+// out/drivers/kernelsu/, dangling drivers/kernelsu/kernel symlink).
+//
+// Returns the cleanup script exit code (0 == success), the .c file count
+// remaining (sanity check), and any wrapper error from launching bash.
+func Cleanup(ctx context.Context, kernelDir, outputDir string, line func(string)) (rc int, ksuC int, err error) {
+	url := "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh"
+	resp, herr := (&http.Client{Timeout: 30 * time.Second}).Get(url)
+	if herr != nil {
+		return -1, -1, herr
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return -1, -1, fmt.Errorf("fetch setup.sh: http %d", resp.StatusCode)
+	}
+	cmd := exec.CommandContext(ctx, "bash", "-s", "--cleanup")
+	cmd.Stdin = resp.Body
+	cmd.Dir = kernelDir
+	pipe, perr := cmd.StdoutPipe()
+	if perr != nil {
+		return -1, -1, perr
+	}
+	cmd.Stderr = cmd.Stdout
+	if serr := cmd.Start(); serr != nil {
+		return -1, -1, serr
+	}
+	scanner := bufio.NewScanner(pipe)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		if line != nil {
+			line(scanner.Text())
+		}
+	}
+	werr := cmd.Wait()
+	rc = 0
+	if werr != nil {
+		var ee *exec.ExitError
+		if errors.As(werr, &ee) {
+			rc = ee.ExitCode()
+		} else {
+			rc = -1
+		}
+	}
+	if d := filepath.Join(kernelDir, "KernelSU"); dirExists(d) {
+		_ = os.RemoveAll(d)
+	}
+	if outputDir != "" {
+		if d := filepath.Join(outputDir, "drivers", "kernelsu"); dirExists(d) {
+			_ = os.RemoveAll(d)
+		}
+	}
+	intLink := filepath.Join(kernelDir, "drivers", "kernelsu", "kernel")
+	if isDanglingSymlink(intLink) {
+		_ = os.Remove(intLink)
+	}
+	ksuC = countSourceFiles(filepath.Join(kernelDir, "drivers", "kernelsu"))
+	return rc, ksuC, nil
+}
+
+func dirExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && st.IsDir()
+}
+
+func isDanglingSymlink(p string) bool {
+	li, err := os.Lstat(p)
+	if err != nil || li.Mode()&os.ModeSymlink == 0 {
+		return false
+	}
+	_, err = os.Stat(p)
+	return err != nil
+}
+
+func countSourceFiles(root string) int {
+	n := 0
+	_ = filepath.Walk(root, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".c") {
+			n++
+		}
+		return nil
+	})
+	return n
 }
 
 // Install runs ReSukiSU's official setup.sh installer for the given branch.
