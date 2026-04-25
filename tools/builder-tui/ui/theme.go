@@ -67,6 +67,50 @@ var CurrentStyle StyleVariant = StyleBash
 // Empty means "use the theme default". Updated via ApplyAccentOverride.
 var AccentOverride = ""
 
+// FrameOverride overrides the border shape independent of StyleVariant.
+// Recognised values: "double", "rounded", "thick", "normal", "ascii".
+// Empty = let the active style pick its canonical border. Updated via
+// ApplyFrameOverride.
+var FrameOverride = ""
+
+// FramePresets lists the valid FrameOverride values in cycle order. The
+// empty string (index 0) resets back to the theme default frame.
+var FramePresets = []string{"", "double", "rounded", "thick", "normal", "ascii"}
+
+// frameBorder resolves a preset name to the lipgloss.Border it should
+// produce. Unknown or empty values fall back to DoubleBorder so we
+// never render a missing frame.
+func frameBorder(name string) lipgloss.Border {
+	switch name {
+	case "rounded":
+		return lipgloss.RoundedBorder()
+	case "thick":
+		return lipgloss.ThickBorder()
+	case "normal":
+		return lipgloss.NormalBorder()
+	case "ascii":
+		return lipgloss.Border{
+			Top:         "-",
+			Bottom:      "-",
+			Left:        "|",
+			Right:       "|",
+			TopLeft:     "+",
+			TopRight:    "+",
+			BottomLeft:  "+",
+			BottomRight: "+",
+		}
+	default:
+		return lipgloss.DoubleBorder()
+	}
+}
+
+// ApplyFrameOverride records and applies a user-chosen border shape.
+// Pass "" to clear the override and let the active theme pick its own.
+func ApplyFrameOverride(name string) {
+	FrameOverride = name
+	ApplyStyle(CurrentStyle)
+}
+
 // ApplyStyle swaps the package-level styles to match v. Safe to call
 // multiple times -- always restores from the canonical bash palette
 // before applying the requested variant so previous overrides don't leak.
@@ -108,6 +152,11 @@ func ApplyStyle(v StyleVariant) {
 	}
 	if AccentOverride != "" {
 		applyAccentColor(AccentOverride)
+	}
+	if FrameOverride != "" {
+		b := frameBorder(FrameOverride)
+		BannerBorder = BannerBorder.Border(b, true)
+		PanelBorder = PanelBorder.Border(b, true)
 	}
 	rebuildDerivedStyles()
 }

@@ -124,6 +124,17 @@ func (s SettingsScreen) Update(msg tea.Msg) (SettingsScreen, tea.Cmd) {
 			} else {
 				cmd = s.app.SetToast("Accent colour: "+next, false)
 			}
+		case "f":
+			// Cycle frame styles (#12). Empty entry resets to theme default.
+			next := nextFramePreset(s.app.Cfg.FrameStyle)
+			s.app.Cfg.FrameStyle = next
+			ApplyFrameOverride(next)
+			s.app.PersistConfig()
+			if next == "" {
+				cmd = s.app.SetToast("Frame style reset to theme default.", false)
+			} else {
+				cmd = s.app.SetToast("Frame style: "+next, false)
+			}
 		}
 		return s, cmd
 	}
@@ -143,6 +154,17 @@ func nextAccentPreset(cur string) string {
 	return accentPresets[0]
 }
 
+// nextFramePreset cycles through FramePresets. Unknown current values
+// fall back to the first preset ("" = theme default).
+func nextFramePreset(cur string) string {
+	for i, p := range FramePresets {
+		if p == cur {
+			return FramePresets[(i+1)%len(FramePresets)]
+		}
+	}
+	return FramePresets[0]
+}
+
 func (s SettingsScreen) View() string {
 	w := panelWidth(s.app.Width)
 	innerW := innerContentWidth(w)
@@ -160,7 +182,12 @@ func (s SettingsScreen) View() string {
 	if accent == "" {
 		accent = "(theme default)"
 	}
-	st.WriteString(components.KV("Accent", accent, 11, LabelStyle, AccentText))
+	st.WriteString(components.KV("Accent", accent, 11, LabelStyle, AccentText) + "\n")
+	frame := s.app.Cfg.FrameStyle
+	if frame == "" {
+		frame = "(theme default)"
+	}
+	st.WriteString(components.KV("Frame", frame, 11, LabelStyle, AccentText))
 	statePanel := components.Panel("Active", st.String(), w, PanelBorder, TitleStyle)
 
 	// Theme variants
@@ -181,6 +208,15 @@ func (s SettingsScreen) View() string {
 	acc.WriteString(components.GlobalBracketTag("R", HotKeyStyle) + "  " +
 		ValueStyle.Render("Reset to theme default"))
 	accPanel := components.Panel("Accent", acc.String(), w, PanelBorder, TitleStyle)
+
+	// Frame picker (#12)
+	var fr strings.Builder
+	fr.WriteString(components.GlobalBracketTag("F", HotKeyStyle) + "  " +
+		ValueStyle.Render("Cycle frame style") + "  " +
+		MutedText.Render("double · rounded · thick · normal · ascii · default") + "\n")
+	fr.WriteString(DimText.Render("  ") +
+		MutedText.Render("border shape is independent of the theme palette."))
+	framePanel := components.Panel("Frame", fr.String(), w, PanelBorder, TitleStyle)
 
 	// Inline editor
 	var editor string
@@ -203,12 +239,13 @@ func (s SettingsScreen) View() string {
 		{Key: "3", Desc: "Mono"},
 		{Key: "A", Desc: "Accent"},
 		{Key: "P", Desc: "Cycle"},
+		{Key: "F", Desc: "Frame"},
 		{Key: "R", Desc: "Reset"},
 		{Key: "ESC", Desc: "Back"},
 	}, HotKeyStyle, ValueStyle, DimText, MutedText)
 
 	divider := "  " + components.Separator(innerW, MutedText) + "\n"
-	out := banner + "\n" + statePanel + "\n" + themesPanel + "\n" + accPanel + editor + "\n" + notice + "\n" +
+	out := banner + "\n" + statePanel + "\n" + themesPanel + "\n" + accPanel + "\n" + framePanel + editor + "\n" + notice + "\n" +
 		divider + "  " + actions + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"

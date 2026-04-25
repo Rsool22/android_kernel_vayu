@@ -59,6 +59,9 @@ power users perform individual actions headlessly:
 		if cfg.AccentColor != "" {
 			ui.ApplyAccentOverride(cfg.AccentColor)
 		}
+		if cfg.FrameStyle != "" {
+			ui.ApplyFrameOverride(cfg.FrameStyle)
+		}
 		app := ui.NewApp(cfg)
 		p := tea.NewProgram(app, tea.WithAltScreen())
 		ui.Program = p

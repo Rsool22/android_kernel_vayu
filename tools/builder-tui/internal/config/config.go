@@ -58,6 +58,11 @@ type Config struct {
 	// 256-colour ANSI index (e.g. "214") or hex string (e.g. "#5fafff").
 	// Empty means "use the theme default".
 	AccentColor string
+	// FrameStyle selects the box border shape independent of the theme
+	// colour palette. Recognised values: "double" (default, ╔═╗),
+	// "rounded" (╭─╮), "thick" (┏━┓), "normal" (┌─┐), "ascii" (+-+).
+	// Empty = let the theme decide.
+	FrameStyle string
 }
 
 // Defaults returns a sensible starting Config.
@@ -144,6 +149,8 @@ func Load() (Config, error) {
 			c.Theme = v
 		case "accent_color":
 			c.AccentColor = v
+		case "frame_style":
+			c.FrameStyle = v
 		}
 	}
 	if err := s.Err(); err != nil {
@@ -187,6 +194,7 @@ func (c Config) Save() error {
 	writeOpt("ksu_branch", c.KSUBranch)
 	writeOpt("theme", c.Theme)
 	writeOpt("accent_color", c.AccentColor)
+	writeOpt("frame_style", c.FrameStyle)
 	if err := w.Flush(); err != nil {
 		f.Close()
 		return err
@@ -216,5 +224,10 @@ func (c *Config) normalize() {
 	case "bash", "modern", "mono":
 	default:
 		c.Theme = "bash"
+	}
+	switch c.FrameStyle {
+	case "", "double", "rounded", "thick", "normal", "ascii":
+	default:
+		c.FrameStyle = ""
 	}
 }
