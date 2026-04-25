@@ -294,22 +294,34 @@ func (s ToolchainScreen) View() string {
 
 // srcRow renders one source-selector row. selected = persisted active source;
 // hovered = cursor position. They render distinctly: selected gets the dot
-// marker + ACTIVE pill; hovered gets a `›` left chevron.
+// marker + ACTIVE pill; hovered gets a `›` left chevron. The label is
+// dot-padded out to the panel's inner width so an ACTIVE pill sits flush
+// against the right edge — matching the dot-leader pattern used by the
+// main menu and Build Options rows.
 func srcRow(key, label string, selected, hovered bool, width int) string {
 	mark := "  "
-	if hovered {
+	switch {
+	case selected:
+		mark = SelText.Render(" ●")
+	case hovered:
 		mark = AccentText.Render(" ›")
 	}
-	if selected {
-		mark = SelText.Render(" ●")
-	}
 	tag := components.BracketTag(key, 1, HotKeyStyle)
-	row := mark + " " + tag + "  " +
+	prefix := mark + " " + tag + "  " +
 		lipgloss.NewStyle().Foreground(ColorValue).Render(label)
+	rhs := ""
 	if selected {
-		row += "  " + components.Badge("ACTIVE", BadgeAccent)
+		rhs = components.Badge("ACTIVE", BadgeAccent)
 	}
-	return row
+	if rhs == "" {
+		return prefix
+	}
+	pad := width - lipgloss.Width(prefix) - lipgloss.Width(rhs) - 2
+	if pad < 1 {
+		return prefix + "  " + rhs
+	}
+	leader := MutedText.Render(" " + strings.Repeat("·", pad-2) + " ")
+	return prefix + leader + rhs
 }
 
 func sourceLabel(c config.Config) string {
