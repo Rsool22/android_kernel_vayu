@@ -116,7 +116,8 @@ func (s ToolchainScreen) Update(msg tea.Msg) (ToolchainScreen, tea.Cmd) {
 }
 
 func (s ToolchainScreen) View() string {
-	w := clampWidth(s.app.Width, 64, 110)
+	w := panelWidth(s.app.Width)
+	inner := innerContentWidth(w)
 
 	// ── Banner ───────────────────────────────────────────────────────────────
 	banner := components.Banner(
@@ -142,7 +143,7 @@ func (s ToolchainScreen) View() string {
 	statePanel := components.Panel("State", st.String(), w, PanelBorder, TitleStyle)
 
 	// ── Source selector panel ───────────────────────────────────────────────
-	innerW := w - 4 - 2 // panel padding
+	innerW := inner
 	var src strings.Builder
 	src.WriteString(srcRow("A", "Auto: Google primary, ZyC fallback", s.app.Cfg.ClangSource == config.ClangAuto, innerW) + "\n")
 	src.WriteString(srcRow("G", "Google AOSP clang (android.googlesource.com)", s.app.Cfg.ClangSource == config.ClangGoogle, innerW) + "\n")

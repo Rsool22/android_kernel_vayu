@@ -49,10 +49,12 @@ var (
 
 var (
 	// Border styles -- DoubleBorder mirrors the ╔═╗ chars used in bash build.sh.
+	// BannerBorder uses the same padding as PanelBorder so the inner content
+	// columns line up across the banner and the panels stacked below it.
 	BannerBorder = lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder(), true).
 			BorderForeground(ColorBanner).
-			Padding(0, 2)
+			Padding(0, 1)
 
 	PanelBorder = lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder(), true).

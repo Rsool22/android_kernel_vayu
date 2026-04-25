@@ -72,13 +72,29 @@ func (a *App) Init() tea.Cmd {
 }
 
 // Update routes messages to the active child screen, intercepting global
-// keys (q/ctrl+c quits; backtick toggles a debug overlay).
+// keys (q/ctrl+c quits; esc returns to main from sub-screens). Window-resize
+// events are broadcast to *every* child so screens which weren't active at
+// startup (build, ksu, …) still see the correct terminal dimensions when the
+// user finally navigates to them.
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m := msg.(type) {
 	case tea.WindowSizeMsg:
 		a.Width = m.Width
 		a.Height = m.Height
 		Width = m.Width
+		var cmds []tea.Cmd
+		var cmd tea.Cmd
+		a.main, cmd = a.main.Update(msg)
+		cmds = append(cmds, cmd)
+		a.toolchain, cmd = a.toolchain.Update(msg)
+		cmds = append(cmds, cmd)
+		a.ksu, cmd = a.ksu.Update(msg)
+		cmds = append(cmds, cmd)
+		a.build, cmd = a.build.Update(msg)
+		cmds = append(cmds, cmd)
+		a.setup, cmd = a.setup.Update(msg)
+		cmds = append(cmds, cmd)
+		return a, tea.Batch(cmds...)
 	case tea.KeyMsg:
 		switch m.String() {
 		case "ctrl+c":

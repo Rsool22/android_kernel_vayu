@@ -114,7 +114,7 @@ func (s KSUScreen) installCmd(branch string) tea.Cmd {
 }
 
 func (s KSUScreen) View() string {
-	w := clampWidth(s.app.Width, 64, 110)
+	w := panelWidth(s.app.Width)
 
 	banner := components.Banner(
 		"ReSukiSU  DRIVER  MANAGER",

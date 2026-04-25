@@ -41,11 +41,15 @@ type buildDoneMsg struct{ res kbuild.Result }
 func (s BuildScreen) Update(msg tea.Msg) (BuildScreen, tea.Cmd) {
 	switch m := msg.(type) {
 	case tea.WindowSizeMsg:
-		s.vp.Width = m.Width - 4
+		// Match the viewport's outer width to the surrounding panels' outer
+		// width. viewport.Width is the *content* width; rounded border (2) +
+		// padding (2) are added on top, so set it to panelOuter - 4.
+		w := panelWidth(m.Width)
+		s.vp.Width = w - 4
 		if s.vp.Width < 40 {
 			s.vp.Width = 40
 		}
-		s.vp.Height = m.Height - 14
+		s.vp.Height = m.Height - 18
 		if s.vp.Height < 8 {
 			s.vp.Height = 8
 		}
@@ -84,7 +88,8 @@ func (s BuildScreen) Update(msg tea.Msg) (BuildScreen, tea.Cmd) {
 }
 
 func (s BuildScreen) View() string {
-	w := clampWidth(s.app.Width, 64, 130)
+	w := panelWidth(s.app.Width)
+	inner := innerContentWidth(w)
 
 	banner := components.Banner(
 		"BUILD  KERNEL",
@@ -121,8 +126,14 @@ func (s BuildScreen) View() string {
 	statusPanel := components.Panel("Build status", st.String(), w, PanelBorder, TitleStyle)
 
 	// ── Compiler output viewport ─────────────────────────────────────────────
-	vpHeader := lipgloss.NewStyle().Foreground(ColorBuild).Bold(true).Render("  Compiler output ") +
-		MutedText.Render(strings.Repeat("─", w-22)) + "\n"
+	// Build the rule so its visible end aligns with the panel borders above.
+	headLabel := lipgloss.NewStyle().Foreground(ColorBuild).Bold(true).Render(" Compiler output ")
+	headFillW := w - lipgloss.Width(headLabel)
+	if headFillW < 0 {
+		headFillW = 0
+	}
+	vpHeader := headLabel + MutedText.Render(strings.Repeat("─", headFillW)) + "\n"
+	_ = inner
 
 	actions := components.HotkeyStrip([]string{
 		components.Hotkey("B", "Build", "compile + package", HotKeyStyle, OKText, DimText),

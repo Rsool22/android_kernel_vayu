@@ -35,7 +35,7 @@ func (s SetupScreen) Update(msg tea.Msg) (SetupScreen, tea.Cmd) {
 }
 
 func (s SetupScreen) View() string {
-	w := clampWidth(s.app.Width, 64, 110)
+	w := panelWidth(s.app.Width)
 
 	banner := components.Banner(
 		"SETUP  ·  PATHS",

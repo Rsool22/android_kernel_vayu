@@ -41,7 +41,8 @@ func (m MainMenu) Update(msg tea.Msg) (MainMenu, tea.Cmd) {
 }
 
 func (m MainMenu) View() string {
-	w := clampWidth(m.app.Width, 64, 110)
+	w := panelWidth(m.app.Width)
+	innerW := innerContentWidth(w)
 
 	// ── Banner ───────────────────────────────────────────────────────────────
 	banner := components.Banner(
@@ -49,9 +50,6 @@ func (m MainMenu) View() string {
 		"Linux 4.14 NonGKI · Poco X3 Pro (vayu) · Android 16 · ReSukiSU",
 		w, BannerBorder, BannerTitle, BannerSubtle,
 	)
-
-	// ── Status panel ─────────────────────────────────────────────────────────
-	innerW := w - 4
 	var status strings.Builder
 	rows := []struct {
 		key, val string
@@ -87,9 +85,8 @@ func (m MainMenu) View() string {
 	}
 	var menu strings.Builder
 	leader := lipgloss.NewStyle().Foreground(ColorMuted)
-	innerMenuW := innerW - 2 // panel padding (1) on each side
 	for i, it := range menuItems {
-		row := components.MenuRow(it.key, it.label, it.rhs, innerMenuW,
+		row := components.MenuRow(it.key, it.label, it.rhs, innerW,
 			HotKeyStyle,
 			lipgloss.NewStyle().Foreground(ColorValue).Bold(true),
 			lipgloss.NewStyle().Foreground(it.fg),
@@ -124,12 +121,45 @@ func okOr(s, alt string) string {
 	return s
 }
 
+// clampWidth returns the outer panel/banner width to use given the terminal
+// columns. We clamp to a minimum so very narrow terminals still produce
+// readable output, and to a generous maximum so ultra-wide terminals
+// (>200 cols) don't render absurdly stretched dotted leaders. Pass max <= 0
+// to disable the upper bound.
 func clampWidth(w, min, max int) int {
 	if w < min {
 		return min
 	}
-	if w > max {
+	if max > 0 && w > max {
 		return max
+	}
+	return w
+}
+
+// panelWidth returns the screen width used for banners/panels: the full
+// terminal width minus a 2-column right gutter so trailing borders never
+// touch the right edge of the terminal (looks much cleaner on most emulators).
+func panelWidth(termWidth int) int {
+	if termWidth <= 0 {
+		termWidth = 80
+	}
+	w := termWidth - 2
+	if w < 60 {
+		w = 60
+	}
+	if w > 160 {
+		w = 160
+	}
+	return w
+}
+
+// innerContentWidth is the visible content area inside a panel after
+// border (2) + horizontal padding (2). Used to size MenuRow leaders, KV
+// padding, etc.
+func innerContentWidth(outerWidth int) int {
+	w := outerWidth - 4
+	if w < 20 {
+		w = 20
 	}
 	return w
 }
