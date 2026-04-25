@@ -48,11 +48,9 @@ func (s SettingsScreen) Update(msg tea.Msg) (SettingsScreen, tea.Cmd) {
 				s.app.Cfg.AccentColor = v
 				ApplyAccentOverride(v)
 				s.app.PersistConfig()
-				s.app.Toast = "Accent colour updated."
-				s.app.ToastErr = false
 				s.editing = false
 				s.input.Blur()
-				return s, nil
+				return s, s.app.SetToast("Accent colour updated.", false)
 			case "esc":
 				s.editing = false
 				s.input.Blur()
@@ -63,9 +61,9 @@ func (s SettingsScreen) Update(msg tea.Msg) (SettingsScreen, tea.Cmd) {
 		s.input, cmd = s.input.Update(msg)
 		return s, cmd
 	}
-	switch m := msg.(type) {
+	switch mm := msg.(type) {
 	case tea.KeyMsg:
-		key := strings.ToLower(m.String())
+		key := strings.ToLower(mm.String())
 		// Arrow-nav cycles the theme variant forwards / backwards
 		// (prompt #5). Wraps around at the ends.
 		if key == "up" || key == "k" || key == "down" || key == "j" {
@@ -85,30 +83,26 @@ func (s SettingsScreen) Update(msg tea.Msg) (SettingsScreen, tea.Cmd) {
 			ApplyStyle(themes[idx])
 			s.app.Cfg.Theme = string(themeLabel(themes[idx]))
 			s.app.PersistConfig()
-			s.app.Toast = "Theme: " + s.app.Cfg.Theme
-			s.app.ToastErr = false
-			return s, nil
+			return s, s.app.SetToast("Theme: "+s.app.Cfg.Theme, false)
 		}
-		_ = m
+		_ = mm
+		var cmd tea.Cmd
 		switch key {
 		case "1", "b":
 			ApplyStyle(StyleBash)
 			s.app.Cfg.Theme = "bash"
 			s.app.PersistConfig()
-			s.app.Toast = "Theme: bash (double-line)."
-			s.app.ToastErr = false
+			cmd = s.app.SetToast("Theme: bash (double-line).", false)
 		case "2", "m":
 			ApplyStyle(StyleModern)
 			s.app.Cfg.Theme = "modern"
 			s.app.PersistConfig()
-			s.app.Toast = "Theme: modern (rounded, soft palette)."
-			s.app.ToastErr = false
+			cmd = s.app.SetToast("Theme: modern (rounded, soft palette).", false)
 		case "3", "n":
 			ApplyStyle(StyleMono)
 			s.app.Cfg.Theme = "mono"
 			s.app.PersistConfig()
-			s.app.Toast = "Theme: mono (low-colour)."
-			s.app.ToastErr = false
+			cmd = s.app.SetToast("Theme: mono (low-colour).", false)
 		case "a":
 			s.editing = true
 			s.input.SetValue(s.app.Cfg.AccentColor)
@@ -118,8 +112,7 @@ func (s SettingsScreen) Update(msg tea.Msg) (SettingsScreen, tea.Cmd) {
 			s.app.Cfg.AccentColor = ""
 			ApplyAccentOverride("")
 			s.app.PersistConfig()
-			s.app.Toast = "Accent colour reset to theme default."
-			s.app.ToastErr = false
+			cmd = s.app.SetToast("Accent colour reset to theme default.", false)
 		case "p":
 			// Cycle accent presets (orange → cyan → green → magenta → reset).
 			next := nextAccentPreset(s.app.Cfg.AccentColor)
@@ -127,12 +120,12 @@ func (s SettingsScreen) Update(msg tea.Msg) (SettingsScreen, tea.Cmd) {
 			ApplyAccentOverride(next)
 			s.app.PersistConfig()
 			if next == "" {
-				s.app.Toast = "Accent colour reset to theme default."
+				cmd = s.app.SetToast("Accent colour reset to theme default.", false)
 			} else {
-				s.app.Toast = "Accent colour: " + next
+				cmd = s.app.SetToast("Accent colour: "+next, false)
 			}
-			s.app.ToastErr = false
 		}
+		return s, cmd
 	}
 	return s, nil
 }

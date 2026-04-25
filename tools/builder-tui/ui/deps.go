@@ -297,7 +297,11 @@ func (s DepsScreen) View() string {
 	}
 
 	divider := "  " + components.Separator(innerContentWidth(w), MutedText) + "\n"
-	out := banner + "\n" + statusPanel + "\n" + tablePanel + "\n" + divider + "  " + actions + busyLine + "\n"
+	out := banner + "\n" + statusPanel + "\n" + tablePanel + "\n"
+	if s.app.Activity != nil {
+		out += components.ActivityPanel(s.app.Activity, w, 5, PanelDim, TitleStyle.Foreground(ColorDim)) + "\n"
+	}
+	out += divider + "  " + actions + busyLine + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}

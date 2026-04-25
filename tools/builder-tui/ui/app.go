@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -43,6 +44,15 @@ type App struct {
 	Screen   Screen
 	Toast    string
 	ToastErr bool
+	// ToastExpiresAt is the wall-clock time at which the current toast
+	// should auto-dismiss (prompt S5). Set by SetToast; a tea.Tick schedules
+	// App.Update to re-examine this field and clear the toast when we pass
+	// the expiry. Zero value means "no expiry" (legacy direct .Toast writes).
+	ToastExpiresAt time.Time
+	// Activity is the shared append-only log rendered on screens that want
+	// a per-screen activity panel (prompt #8). All screens write to this
+	// single instance so the log persists across screen transitions.
+	Activity *components.ActivityLog
 
 	// Builder is the persisted .builder_state (incremental, ccache, branch,
 	// force-clean reason). Reloaded after every persistence-affecting action.
@@ -80,11 +90,12 @@ type App struct {
 func NewApp(cfg config.Config) *App {
 	p, _ := discover.Resolve(".", cfg.KernelDir, cfg.ClangDir, cfg.AnyKernelDir, cfg.OutputDir)
 	a := &App{
-		Cfg:    cfg,
-		Paths:  p,
-		Screen: ScreenMain,
-		Width:  80,
-		Height: 24,
+		Cfg:      cfg,
+		Paths:    p,
+		Screen:   ScreenMain,
+		Width:    80,
+		Height:   24,
+		Activity: components.NewActivityLog(128),
 	}
 	a.refreshPersistence()
 	a.main = NewMainMenu(a)
@@ -141,6 +152,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.settings, cmd = a.settings.Update(msg)
 		cmds = append(cmds, cmd)
 		return a, tea.Batch(cmds...)
+	case toastTickMsg:
+		// Auto-dismiss handler (prompt S5). Only clear the toast when
+		// it's the same one we scheduled for -- later SetToast calls
+		// (their own tick) take precedence over earlier ones.
+		if !a.ToastExpiresAt.IsZero() && !m.when.Before(a.ToastExpiresAt) {
+			a.Toast = ""
+			a.ToastErr = false
+			a.ToastExpiresAt = time.Time{}
+		}
+		return a, nil
 	case tea.KeyMsg:
 		switch m.String() {
 		case "ctrl+c":
@@ -268,12 +289,48 @@ func (a *App) breadcrumb() string {
 // in-app cache. Non-fatal on error -- shows a toast.
 func (a *App) PersistConfig() {
 	if err := a.Cfg.Save(); err != nil {
-		a.Toast = "Config save failed: " + err.Error()
-		a.ToastErr = true
+		a.SetToast("Config save failed: "+err.Error(), true)
 		return
 	}
-	a.Toast = "Config saved."
-	a.ToastErr = false
+	a.SetToast("Config saved.", false)
+}
+
+// ToastDuration is the auto-dismiss window for toasts set via SetToast
+// (prompt S5). Error toasts linger a little longer so the user has time
+// to read the cause before it disappears.
+const (
+	ToastDuration    = 3 * time.Second
+	ToastErrDuration = 6 * time.Second
+)
+
+// toastTickMsg fires when a scheduled toast is due for review. The
+// handler in App.Update clears the toast if its expiry has passed.
+type toastTickMsg struct{ when time.Time }
+
+// SetToast records a transient status line at the bottom of every
+// screen, logs the same message to the shared ActivityLog so it stays
+// visible after the toast auto-dismisses, and schedules a tea.Tick to
+// clear the toast after ToastDuration. The return tea.Cmd MUST be
+// threaded back through Update for the auto-dismiss to fire; callers
+// that don't care about the command can ignore it -- the toast will
+// then only clear on the next keypress that triggers a repaint.
+func (a *App) SetToast(msg string, isErr bool) tea.Cmd {
+	a.Toast = msg
+	a.ToastErr = isErr
+	d := ToastDuration
+	level := components.ActInfo
+	if isErr {
+		d = ToastErrDuration
+		level = components.ActErr
+	}
+	a.ToastExpiresAt = time.Now().Add(d)
+	if a.Activity != nil {
+		a.Activity.Append(level, msg)
+	}
+	expiry := a.ToastExpiresAt
+	return tea.Tick(d+50*time.Millisecond, func(time.Time) tea.Msg {
+		return toastTickMsg{when: expiry}
+	})
 }
 
 // refreshPersistence reloads the per-kernel-tree state files plus the

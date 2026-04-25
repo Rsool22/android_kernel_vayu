@@ -223,7 +223,11 @@ func (s SetupScreen) View() string {
 	}
 
 	divider := "  " + components.Separator(innerContentWidth(w), MutedText) + "\n"
-	out := banner + "\n" + pathsPanel + "\n" + editorPanel + hintsPanel + divider + "  " + actions + "\n"
+	out := banner + "\n" + pathsPanel + "\n" + editorPanel + hintsPanel
+	if s.app.Activity != nil {
+		out += components.ActivityPanel(s.app.Activity, w, 5, PanelDim, TitleStyle.Foreground(ColorDim)) + "\n"
+	}
+	out += divider + "  " + actions + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}

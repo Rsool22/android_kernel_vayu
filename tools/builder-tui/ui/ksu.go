@@ -64,20 +64,14 @@ func (s KSUScreen) Update(msg tea.Msg) (KSUScreen, tea.Cmd) {
 		s.dev = m.dev
 		s.probed = true
 		s.busy = false
-		s.app.Toast = "Upstream probed."
-		s.app.ToastErr = false
-		return s, nil
+		return s, s.app.SetToast("Upstream probed.", false)
 	case ksuActionDoneMsg:
 		s.busy = false
 		s.stage = ""
 		if m.err != nil {
-			s.app.Toast = m.stage + " failed: " + m.err.Error()
-			s.app.ToastErr = true
-		} else {
-			s.app.Toast = m.stage + " complete."
-			s.app.ToastErr = false
+			return s, s.app.SetToast(m.stage+" failed: "+m.err.Error(), true)
 		}
-		return s, nil
+		return s, s.app.SetToast(m.stage+" complete.", false)
 	case tea.KeyMsg:
 		if s.busy {
 			return s, nil
@@ -109,9 +103,7 @@ func (s KSUScreen) Update(msg tea.Msg) (KSUScreen, tea.Cmd) {
 			selected := s.app.Cfg.KSUBranch
 			brstate := s.branchState(selected)
 			if brstate != resukisu.StatePresent {
-				s.app.Toast = "Cannot install: " + selected + " branch is " + string(brstate)
-				s.app.ToastErr = true
-				return s, nil
+				return s, s.app.SetToast("Cannot install: "+selected+" branch is "+string(brstate), true)
 			}
 			s.busy = true
 			s.stage = "installing " + selected
@@ -129,36 +121,25 @@ func (s KSUScreen) Update(msg tea.Msg) (KSUScreen, tea.Cmd) {
 		s.busy = false
 		s.stage = ""
 		if m.err != nil {
-			s.app.Toast = "Guards: " + m.err.Error()
-			s.app.ToastErr = true
+			return s, s.app.SetToast("Guards: "+m.err.Error(), true)
 		} else if m.report.Summary != "" {
-			s.app.Toast = "Guards: " + m.report.Summary
-			s.app.ToastErr = m.report.HasFixes()
-		} else {
-			s.app.Toast = "Guards verified"
-			s.app.ToastErr = false
+			return s, s.app.SetToast("Guards: "+m.report.Summary, m.report.HasFixes())
 		}
-		return s, nil
+		return s, s.app.SetToast("Guards verified", false)
 	case ksuRemoveDoneMsg:
 		s.busy = false
 		s.stage = ""
 		if m.err != nil {
-			s.app.Toast = "Remove failed: " + m.err.Error()
-			s.app.ToastErr = true
-			return s, nil
+			return s, s.app.SetToast("Remove failed: "+m.err.Error(), true)
 		}
 		if m.rc == 0 && m.dirGone {
 			s.disableKSUInDefconfig()
 			s.app.Builder.ForceCleanReason = "Driver removed"
 			s.app.Builder.Incremental = false
 			_ = s.app.Builder.Save(s.app.Paths.Kernel)
-			s.app.Toast = "Driver removed -- defconfig reset"
-			s.app.ToastErr = false
-		} else {
-			s.app.Toast = "Cleanup failed or driver already gone (exit " + itoa(m.rc) + ")"
-			s.app.ToastErr = true
+			return s, s.app.SetToast("Driver removed -- defconfig reset", false)
 		}
-		return s, nil
+		return s, s.app.SetToast("Cleanup failed or driver already gone (exit "+itoa(m.rc)+")", true)
 	}
 	return s, nil
 }
@@ -283,7 +264,11 @@ func (s KSUScreen) View() string {
 	}, HotKeyStyle, ValueStyle, DimText, MutedText)
 
 	divider := "  " + components.Separator(innerContentWidth(w), MutedText) + "\n"
-	out := banner + "\n" + selPanel + "\n" + upsPanel + "\n" + divider + "  " + actions + "\n"
+	out := banner + "\n" + selPanel + "\n" + upsPanel + "\n"
+	if s.app.Activity != nil {
+		out += components.ActivityPanel(s.app.Activity, w, 5, PanelDim, TitleStyle.Foreground(ColorDim)) + "\n"
+	}
+	out += divider + "  " + actions + "\n"
 
 	if s.busy {
 		out += "\n  " + AccentText.Render(s.stage+" …") + "\n"

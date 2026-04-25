@@ -106,27 +106,27 @@ func (s ToolchainScreen) Update(msg tea.Msg) (ToolchainScreen, tea.Cmd) {
 			if len(s.inventory) > 0 {
 				tgt := s.inventory[s.invCursor]
 				lib := clang.LibraryDir(s.app.Paths.Clang)
+				var cmd tea.Cmd
 				if err := clang.MakeActive(lib, tgt.Dir); err != nil {
-					s.app.Toast = "Switch failed: " + err.Error()
-					s.app.ToastErr = true
+					cmd = s.app.SetToast("Switch failed: "+err.Error(), true)
 				} else {
-					s.app.Toast = "Active clang \u2192 " + tgt.Tag
-					s.app.ToastErr = false
+					cmd = s.app.SetToast("Active clang \u2192 "+tgt.Tag, false)
 				}
 				s = s.refreshInventory()
+				return s, cmd
 			}
 		case "r":
 			if len(s.inventory) > 0 {
 				tgt := s.inventory[s.invCursor]
 				lib := clang.LibraryDir(s.app.Paths.Clang)
+				var cmd tea.Cmd
 				if err := clang.Remove(lib, tgt.Dir); err != nil {
-					s.app.Toast = "Remove failed: " + err.Error()
-					s.app.ToastErr = true
+					cmd = s.app.SetToast("Remove failed: "+err.Error(), true)
 				} else {
-					s.app.Toast = "Removed " + tgt.Tag
-					s.app.ToastErr = false
+					cmd = s.app.SetToast("Removed "+tgt.Tag, false)
 				}
 				s = s.refreshInventory()
+				return s, cmd
 			}
 		}
 	case tcQueryDoneMsg:
@@ -136,13 +136,10 @@ func (s ToolchainScreen) Update(msg tea.Msg) (ToolchainScreen, tea.Cmd) {
 			if strings.Contains(msg, "rate limited") || strings.Contains(msg, "rate limit") {
 				msg += "  (set $ZYC_GH_TOKEN to lift the 60/h limit)"
 			}
-			s.app.Toast = "Query failed: " + msg
-			s.app.ToastErr = true
-			return s, nil
+			return s, s.app.SetToast("Query failed: "+msg, true)
 		}
 		s.last = fmt.Sprintf("%s : %s (%s)", m.rel.Source, m.rel.Tag, sizeStr(m.rel.SizeBytes))
-		s.app.Toast = "Latest " + s.last
-		s.app.ToastErr = false
+		return s, s.app.SetToast("Latest "+s.last, false)
 	case tcDownloadProgressMsg:
 		if m.total > 0 {
 			cmd := s.prog.SetPercent(float64(m.done) / float64(m.total))
@@ -151,15 +148,14 @@ func (s ToolchainScreen) Update(msg tea.Msg) (ToolchainScreen, tea.Cmd) {
 	case tcInstallDoneMsg:
 		s.busy = false
 		s.stage = ""
+		var cmd tea.Cmd
 		if m.err != nil {
-			s.app.Toast = "Install failed: " + m.err.Error()
-			s.app.ToastErr = true
+			cmd = s.app.SetToast("Install failed: "+m.err.Error(), true)
 		} else {
-			s.app.Toast = "Clang installed at " + s.app.Paths.Clang
-			s.app.ToastErr = false
+			cmd = s.app.SetToast("Clang installed at "+s.app.Paths.Clang, false)
 		}
 		s = s.refreshInventory()
-		return s, nil
+		return s, cmd
 	case tcInventoryRefreshMsg:
 		s = s.refreshInventory()
 		return s, nil
@@ -229,7 +225,14 @@ func (s ToolchainScreen) View() string {
 	invPanel := s.renderInventoryPanel(w, innerW)
 
 	divider := "  " + components.Separator(innerContentWidth(w), MutedText) + "\n"
-	out := banner + "\n" + statePanel + "\n" + srcPanel + "\n" + invPanel + "\n" + divider + "  " + actions + "\n"
+	out := banner + "\n" + statePanel + "\n" + srcPanel + "\n" + invPanel + "\n"
+	// Shared activity log (prompt #8) -- lives below the library panel so
+	// the user can see install / switch / remove actions scroll past even
+	// after the toast auto-dismisses.
+	if s.app.Activity != nil {
+		out += components.ActivityPanel(s.app.Activity, w, 5, PanelDim, TitleStyle.Foreground(ColorDim)) + "\n"
+	}
+	out += divider + "  " + actions + "\n"
 
 	if s.busy {
 		out += "\n  " + AccentText.Render(s.stage+" …") + "\n  " + s.prog.View() + "\n"

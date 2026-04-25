@@ -64,9 +64,7 @@ func (s FeaturesScreen) Update(msg tea.Msg) (FeaturesScreen, tea.Cmd) {
 		}
 		dc := s.defconfigPath()
 		if dc == "" {
-			s.app.Toast = "Kernel root not resolved -- run Setup first"
-			s.app.ToastErr = true
-			return s, nil
+			return s, s.app.SetToast("Kernel root not resolved -- run Setup first", true)
 		}
 		key := strings.ToLower(m.String())
 		// Arrow-nav cursor across the 3 feature rows (prompt #5).
@@ -82,53 +80,45 @@ func (s FeaturesScreen) Update(msg tea.Msg) (FeaturesScreen, tea.Cmd) {
 			// through into the original per-row switch below.
 			key = []string{"1", "2", "3"}[s.focus]
 		}
+		var cmd tea.Cmd
 		switch key {
 		case "1":
 			st, err := features.ToggleKSU(dc, s.state)
 			s.state = st
 			if err != nil {
-				s.app.Toast = err.Error()
-				s.app.ToastErr = true
+				cmd = s.app.SetToast(err.Error(), true)
 			} else if st.KSU {
-				s.app.Toast = "ReSukiSU enabled (Manual-Hook on)"
-				s.app.ToastErr = false
+				cmd = s.app.SetToast("ReSukiSU enabled (Manual-Hook on)", false)
 			} else {
-				s.app.Toast = "ReSukiSU disabled (SuSFS + KPM + ManualHook cleared)"
-				s.app.ToastErr = false
+				cmd = s.app.SetToast("ReSukiSU disabled (SuSFS + KPM + ManualHook cleared)", false)
 			}
 		case "2":
 			st, err := features.ToggleSUSFS(dc, s.state)
 			s.state = st
 			if err != nil {
-				s.app.Toast = err.Error()
-				s.app.ToastErr = true
+				cmd = s.app.SetToast(err.Error(), true)
 			} else if st.SUSFS {
-				s.app.Toast = "SuSFS enabled (SuSFS-Inline-Hook active)"
-				s.app.ToastErr = false
+				cmd = s.app.SetToast("SuSFS enabled (SuSFS-Inline-Hook active)", false)
 			} else {
-				s.app.Toast = "SuSFS disabled (Manual-Hook auto-enabled)"
-				s.app.ToastErr = false
+				cmd = s.app.SetToast("SuSFS disabled (Manual-Hook auto-enabled)", false)
 			}
 		case "3":
 			st, err := features.ToggleKPM(dc, s.state)
 			s.state = st
 			if err != nil {
-				s.app.Toast = err.Error()
-				s.app.ToastErr = true
+				cmd = s.app.SetToast(err.Error(), true)
 			} else if st.KPM {
-				s.app.Toast = "KPM enabled"
-				s.app.ToastErr = false
+				cmd = s.app.SetToast("KPM enabled", false)
 			} else {
-				s.app.Toast = "KPM disabled"
-				s.app.ToastErr = false
+				cmd = s.app.SetToast("KPM disabled", false)
 			}
 		case "r":
 			s.refresh()
-			s.app.Toast = "Defconfig re-read."
-			s.app.ToastErr = false
+			cmd = s.app.SetToast("Defconfig re-read.", false)
 		case "m":
 			return s, s.runMenuconfig()
 		}
+		return s, cmd
 	case menuconfigDoneMsg:
 		s.handleMenuconfigDone(m)
 		s.refresh()
@@ -303,7 +293,11 @@ func (s FeaturesScreen) View() string {
 	}, HotKeyStyle, ValueStyle, DimText, MutedText)
 
 	divider := "  " + components.Separator(innerW, MutedText) + "\n"
-	out := banner + "\n" + togPanel + "\n" + sumPanel + "\n" + divider + "  " + actions + "\n"
+	out := banner + "\n" + togPanel + "\n" + sumPanel + "\n"
+	if s.app.Activity != nil {
+		out += components.ActivityPanel(s.app.Activity, w, 5, PanelDim, TitleStyle.Foreground(ColorDim)) + "\n"
+	}
+	out += divider + "  " + actions + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}
