@@ -132,6 +132,10 @@ type Result struct {
 
 	// Last fail log path (combined log written via tee while compiling).
 	FailLog string
+
+	// Guard is the parsed apply_ksu_guards.py report (Stage 3). Empty when
+	// the guard script was not present.
+	Guard GuardReport
 }
 
 // StageResult records one stage outcome.
@@ -280,10 +284,14 @@ func Run(ctx context.Context, o Options, st features.State, events chan<- Event)
 				}
 				events <- Event{Kind: KindLine, Stage: StageGuard, Line: l}
 			}
+			r.Guard = ParseGuardReport(string(out))
 			if err != nil {
 				emit(StageGuard, StatusFailed, "guard script: "+err.Error(), time.Since(t))
 			} else {
-				summary := guardSummary(string(out))
+				summary := r.Guard.Summary
+				if summary == "" {
+					summary = "guards verified"
+				}
 				emit(StageGuard, StatusOK, summary, time.Since(t))
 			}
 		}

@@ -422,7 +422,11 @@ func (s BuildScreen) renderResultPanel(w, inner int) string {
 		border = PanelWarn
 		title = lipgloss.NewStyle().Foreground(ColorWarn).Bold(true)
 	}
-	return components.Panel(strings.ToUpper(string(kind.String())), b.String(), w, border, title)
+	out := components.Panel(strings.ToUpper(kind.String()), b.String(), w, border, title)
+	if gp := renderGuardPanel(r.Guard, w); gp != "" {
+		out += "\n" + gp
+	}
+	return out
 }
 
 func (s BuildScreen) renderSuccessSummary(inner int) string {
