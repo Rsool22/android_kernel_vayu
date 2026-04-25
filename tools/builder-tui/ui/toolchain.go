@@ -82,7 +82,11 @@ func (s ToolchainScreen) Update(msg tea.Msg) (ToolchainScreen, tea.Cmd) {
 	case tcQueryDoneMsg:
 		s.busy = false
 		if m.err != nil {
-			s.app.Toast = "Query failed: " + m.err.Error()
+			msg := m.err.Error()
+			if strings.Contains(msg, "rate limited") || strings.Contains(msg, "rate limit") {
+				msg += "  (set $ZYC_GH_TOKEN to lift the 60/h limit)"
+			}
+			s.app.Toast = "Query failed: " + msg
 			s.app.ToastErr = true
 			return s, nil
 		}
@@ -271,7 +275,20 @@ func (s ToolchainScreen) queryThenFetchCmd() tea.Cmd {
 		if dest == "" {
 			return tcInstallDoneMsg{err: fmt.Errorf("install dir unknown (configure Setup > Paths first)")}
 		}
-		err = clang.Install(ctx, rel, dest, nil)
+		// Pump bytes-downloaded progress back into the tea event loop via
+		// Program.Send so the bubbles progress.Model animates in real time.
+		var lastSent time.Time
+		cb := clang.ProgressFunc(func(done, total int64) {
+			if Program == nil {
+				return
+			}
+			if time.Since(lastSent) < 100*time.Millisecond && done < total {
+				return
+			}
+			lastSent = time.Now()
+			Program.Send(tcDownloadProgressMsg{done: done, total: total})
+		})
+		err = clang.Install(ctx, rel, dest, cb)
 		return tcInstallDoneMsg{err: err}
 	}
 }
