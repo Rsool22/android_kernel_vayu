@@ -173,8 +173,30 @@ func Run(ctx context.Context, o Options, st features.State, events chan<- Event)
 
 	r := Result{Stages: map[Stage]StageResult{}}
 	t0 := time.Now()
+
+	// Master build log -- a tee of every stage's stdout/stderr plus the
+	// stage delimiter banners. Mirrors the FIFO+tee plumbing in the bash
+	// original so post-mortem inspection ('cat out/BUILD.log | less -R')
+	// shows the full timeline, not just compile errors.
+	var masterLog *os.File
+	if o.OutputDir != "" {
+		_ = os.MkdirAll(o.OutputDir, 0o755)
+		masterLog, _ = os.Create(filepath.Join(o.OutputDir, "BUILD.log"))
+		if masterLog != nil {
+			fmt.Fprintf(masterLog, "# vayu-builder pipeline -- %s\n", t0.Format(time.RFC3339))
+			fmt.Fprintf(masterLog, "# kernel=%s out=%s clang=%s\n",
+				o.KernelDir, o.OutputDir, o.ClangDir)
+			fmt.Fprintln(masterLog, strings.Repeat("=", 78))
+		}
+	}
 	defer func() {
 		r.Elapsed = time.Since(t0)
+		if masterLog != nil {
+			fmt.Fprintln(masterLog, strings.Repeat("=", 78))
+			fmt.Fprintf(masterLog, "# pipeline finished in %s, exit=%d cancel=%v\n",
+				r.Elapsed.Truncate(time.Second), r.ExitCode, r.Cancelled)
+			masterLog.Close()
+		}
 		events <- Event{Kind: KindDone, Result: &r}
 	}()
 
@@ -182,9 +204,18 @@ func Run(ctx context.Context, o Options, st features.State, events chan<- Event)
 	emit := func(stage Stage, st Status, detail string, dur time.Duration) {
 		r.Stages[stage] = StageResult{Status: st, Detail: detail, Elapsed: dur}
 		events <- Event{Kind: KindStageEnd, Stage: stage, Status: st, Detail: detail}
+		if masterLog != nil {
+			fmt.Fprintf(masterLog, "[stage %s] END   status=%d detail=%s (%s)\n",
+				stage, int(st), detail, dur.Truncate(time.Millisecond))
+			fmt.Fprintln(masterLog, strings.Repeat("-", 78))
+		}
 	}
 	stageStart := func(stage Stage, detail string) time.Time {
 		events <- Event{Kind: KindStageStart, Stage: stage, Detail: detail}
+		if masterLog != nil {
+			fmt.Fprintln(masterLog, strings.Repeat("-", 78))
+			fmt.Fprintf(masterLog, "[stage %s] START %s\n", stage, detail)
+		}
 		return time.Now()
 	}
 
@@ -352,6 +383,13 @@ func Run(ctx context.Context, o Options, st features.State, events chan<- Event)
 		line := func(l string, isErr bool) {
 			if logF != nil {
 				logF.WriteString(l + "\n")
+			}
+			if masterLog != nil {
+				if isErr {
+					fmt.Fprintln(masterLog, "!! "+l)
+				} else {
+					fmt.Fprintln(masterLog, l)
+				}
 			}
 			events <- Event{Kind: KindLine, Stage: StageCompile, Line: l, IsErr: isErr}
 		}
