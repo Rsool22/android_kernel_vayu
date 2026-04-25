@@ -173,7 +173,9 @@ jobs:
   build:
     name: Build [${{ matrix.ksu_branch }}]
     needs: probe
-    if: needs.probe.outputs.should_build == 'true'
+    # always() so the build can proceed even when reset-counter is skipped
+    # (default `needs:` requires success of the entire transitive needs chain).
+    if: always() && needs.probe.result == 'success' && needs.probe.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
@@ -271,7 +273,7 @@ jobs:
   release:
     name: Publish rolling release
     needs: [probe, build]
-    if: needs.probe.outputs.should_build == 'true' && (needs.probe.outputs.main_available == 'true' || needs.probe.outputs.dev_available == 'true')
+    if: always() && needs.probe.result == 'success' && needs.probe.outputs.should_build == 'true' && (needs.probe.outputs.main_available == 'true' || needs.probe.outputs.dev_available == 'true')
     runs-on: ubuntu-latest
     permissions:
       contents: write
