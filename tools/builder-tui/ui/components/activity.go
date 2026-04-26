@@ -92,6 +92,14 @@ func (l *ActivityLog) Clear() {
 // uses the dim border variant so it doesn't visually compete with the
 // primary content boxes above it.
 func ActivityPanel(log *ActivityLog, width, maxRows int, border lipgloss.Style, titleStyle lipgloss.Style) string {
+	return TitledLogPanel("Activity", log, width, maxRows, border, titleStyle)
+}
+
+// TitledLogPanel is the variant of ActivityPanel that lets the caller
+// override the panel title -- useful for screens (toolchain manager,
+// ReSukiSU manager, …) that want a dedicated "Log" panel documenting
+// the run while still reusing the shared activity buffer for events.
+func TitledLogPanel(title string, log *ActivityLog, width, maxRows int, border lipgloss.Style, titleStyle lipgloss.Style) string {
 	if log == nil {
 		return ""
 	}
@@ -103,7 +111,7 @@ func ActivityPanel(log *ActivityLog, width, maxRows int, border lipgloss.Style, 
 	if len(all) == 0 {
 		empty := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Italic(true).
 			Render("(no activity yet)")
-		return Panel("Activity", empty, width, border, titleStyle)
+		return Panel(title, empty, width, border, titleStyle)
 	}
 	var b strings.Builder
 	for i, e := range all {
@@ -112,7 +120,7 @@ func ActivityPanel(log *ActivityLog, width, maxRows int, border lipgloss.Style, 
 		}
 		b.WriteString(renderActivityLine(e, inner))
 	}
-	return Panel("Activity", b.String(), width, border, titleStyle)
+	return Panel(title, b.String(), width, border, titleStyle)
 }
 
 // renderActivityLine formats one entry: `[12:04:55] [i]  message`.

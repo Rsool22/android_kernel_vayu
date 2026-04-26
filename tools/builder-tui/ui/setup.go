@@ -205,26 +205,27 @@ func (s SetupScreen) View() string {
 		hintsPanel = components.Panel("Install hints ("+string(s.app.Paths.Distro)+")", h.String(), w, PanelBorder, TitleStyle) + "\n"
 	}
 
-	var actions string
+	var keysPanel string
 	if s.editing != 0 {
-		actions = components.HotkeyStrip([]components.Hotkey{
+		keysPanel = components.KeysPanel([]components.Hotkey{
 			{Key: "Enter", Desc: "Save"},
 			{Key: "ESC", Desc: "Cancel"},
-		}, HotKeyStyle, ValueStyle, DimText, MutedText)
+		}, w, PanelDim, TitleStyle.Foreground(ColorDim),
+			HotKeyStyle, ValueStyle, DimText, MutedText)
 	} else {
-		actions = components.HotkeyStrip([]components.Hotkey{
+		keysPanel = components.KeysPanel([]components.Hotkey{
 			{Key: "1-6", Desc: "Edit", Sub: "path slot"},
 			{Key: "R", Desc: "Re-scan"},
 			{Key: "ESC", Desc: "Back"},
-		}, HotKeyStyle, ValueStyle, DimText, MutedText)
+		}, w, PanelDim, TitleStyle.Foreground(ColorDim),
+			HotKeyStyle, ValueStyle, DimText, MutedText)
 	}
 
-	divider := "  " + components.Separator(innerContentWidth(w), MutedText) + "\n"
 	out := banner + "\n" + pathsPanel + "\n" + editorPanel + hintsPanel
 	if s.app.Activity != nil {
 		out += components.ActivityPanel(s.app.Activity, w, 5, PanelDim, TitleStyle.Foreground(ColorDim)) + "\n"
 	}
-	out += divider + "  " + actions + "\n"
+	out += keysPanel + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}

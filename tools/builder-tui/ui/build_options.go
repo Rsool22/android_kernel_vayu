@@ -200,23 +200,23 @@ func (s BuildOptionsScreen) View() string {
 			w, PanelBorder.BorderForeground(ColorBanner), TitleStyle.Foreground(ColorBanner)) + "\n"
 	}
 
-	// ── Hotkey strip + toast + help ─────────────────────────────────────────
-	actions := components.HotkeyStrip([]components.Hotkey{
+	// ── Keys panel (replaces the old footer strip) ──────────────────────────
+	keysPanel := components.KeysPanel([]components.Hotkey{
 		{Key: "N", Desc: "Name"},
-		{Key: "I", Desc: "Incr."},
+		{Key: "I", Desc: "Incremental"},
 		{Key: "C", Desc: "ccache"},
-		{Key: "X", Desc: "Reset"},
-		{Key: "S", Desc: "Start"},
-		{Key: "B", Desc: "Back"},
+		{Key: "X", Desc: "Reset counter"},
+		{Key: "S", Desc: "Start build"},
+		{Key: "B", Desc: "Back", Sub: "features"},
 		{Key: "ESC", Desc: "Main"},
-	}, HotKeyStyle, ValueStyle, DimText, MutedText)
+	}, w, PanelDim, TitleStyle.Foreground(ColorDim),
+		HotKeyStyle, ValueStyle, DimText, MutedText)
 
-	out := banner + "\n" + summaryPanel + "\n" + togglesPanel + editor + "\n" +
-		"  " + components.Separator(inner, MutedText) + "\n" +
-		"  " + actions + "\n"
+	out := banner + "\n" + summaryPanel + "\n" + togglesPanel + editor + "\n" + keysPanel + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}
+	_ = inner
 	return out
 }
 

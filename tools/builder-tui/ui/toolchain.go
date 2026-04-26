@@ -26,6 +26,14 @@ type ToolchainScreen struct {
 	last      string
 	inventory []clang.Entry
 	invCursor int
+	// dlDone / dlTotal capture the most recent bytes-downloaded status
+	// emitted by the streaming progress callback. Used to label the
+	// progress bar with "X / Y" text and to feed periodic Activity log
+	// entries during a download.
+	dlDone, dlTotal int64
+	// dlLogTick throttles "downloading X / Y" Activity log entries to
+	// roughly one per second so the log doesn't get spammed.
+	dlLogTick time.Time
 }
 
 func NewToolchainScreen(a *App) ToolchainScreen {
@@ -90,13 +98,16 @@ func (s ToolchainScreen) Update(msg tea.Msg) (ToolchainScreen, tea.Cmd) {
 			s.app.Cfg.ClangSource = config.ClangZyC
 			s.app.Cfg.ZyCTarget = "23"
 			s.app.PersistConfig()
-		case "c":
-			s.busy = true
-			s.stage = "querying upstream"
-			return s, s.queryCmd()
 		case "f":
 			s.busy = true
 			s.stage = "querying upstream"
+			s.dlDone = 0
+			s.dlTotal = 0
+			s.dlLogTick = time.Time{}
+			if s.app.Activity != nil {
+				s.app.Activity.Info(fmt.Sprintf("clang: fetch requested (source=%s)",
+					s.app.Cfg.ClangSource))
+			}
 			return s, s.queryThenFetchCmd()
 		case "n":
 			if len(s.inventory) > 0 {
@@ -141,17 +152,39 @@ func (s ToolchainScreen) Update(msg tea.Msg) (ToolchainScreen, tea.Cmd) {
 		s.last = fmt.Sprintf("%s : %s (%s)", m.rel.Source, m.rel.Tag, sizeStr(m.rel.SizeBytes))
 		return s, s.app.SetToast("Latest "+s.last, false)
 	case tcDownloadProgressMsg:
+		s.dlDone = m.done
+		s.dlTotal = m.total
+		// Feed the activity log a throttled "downloading X / Y" line
+		// so the user has a permanent record of progress (the toast
+		// auto-dismisses after a few seconds).
+		if s.app.Activity != nil && time.Since(s.dlLogTick) > time.Second {
+			s.dlLogTick = time.Now()
+			if m.total > 0 {
+				pct := int(float64(m.done) / float64(m.total) * 100)
+				s.app.Activity.Info(fmt.Sprintf("clang: downloading %s / %s (%d%%)",
+					sizeStr(m.done), sizeStr(m.total), pct))
+			} else {
+				s.app.Activity.Info(fmt.Sprintf("clang: downloading %s …", sizeStr(m.done)))
+			}
+		}
 		if m.total > 0 {
 			cmd := s.prog.SetPercent(float64(m.done) / float64(m.total))
 			return s, cmd
 		}
+		return s, nil
 	case tcInstallDoneMsg:
 		s.busy = false
 		s.stage = ""
 		var cmd tea.Cmd
 		if m.err != nil {
+			if s.app.Activity != nil {
+				s.app.Activity.Err("clang: install failed — " + m.err.Error())
+			}
 			cmd = s.app.SetToast("Install failed: "+m.err.Error(), true)
 		} else {
+			if s.app.Activity != nil {
+				s.app.Activity.Ok("clang: installed at " + s.app.Paths.Clang)
+			}
 			cmd = s.app.SetToast("Clang installed at "+s.app.Paths.Clang, false)
 		}
 		s = s.refreshInventory()
@@ -210,32 +243,47 @@ func (s ToolchainScreen) View() string {
 	}
 	srcPanel := components.Panel("Source", src.String(), w, PanelBorder, TitleStyle)
 
-	// ── Action strip ────────────────────────────────────────────────────────
-	actions := components.HotkeyStrip([]components.Hotkey{
+	// ── Keys panel ──────────────────────────────────────────────────────────
+	// "[C] Check latest" was dropped -- the download progress bar now
+	// surfaces the upstream version implicitly via the Content-Length
+	// HEAD probe, so a separate query action is redundant.
+	keysPanel := components.KeysPanel([]components.Hotkey{
 		{Key: "F", Desc: "Fetch", Sub: "versioned install"},
-		{Key: "C", Desc: "Check latest", Sub: "query upstream"},
 		{Key: "N", Desc: "Next", Sub: "cycle inventory"},
 		{Key: "X", Desc: "Switch", Sub: "activate selected"},
 		{Key: "R", Desc: "Remove", Sub: "delete selected"},
 		{Key: "ESC", Desc: "Back"},
-	}, HotKeyStyle, ValueStyle, DimText, MutedText)
+	}, w, PanelDim, TitleStyle.Foreground(ColorDim),
+		HotKeyStyle, ValueStyle, DimText, MutedText)
 
 	// Inventory panel: lists installed clang versions side-by-side
 	// with the active one and allows the user to switch.
 	invPanel := s.renderInventoryPanel(w, innerW)
 
-	divider := "  " + components.Separator(innerContentWidth(w), MutedText) + "\n"
 	out := banner + "\n" + statePanel + "\n" + srcPanel + "\n" + invPanel + "\n"
-	// Shared activity log (prompt #8) -- lives below the library panel so
-	// the user can see install / switch / remove actions scroll past even
-	// after the toast auto-dismisses.
+	// Run-log panel -- documents every action on this screen
+	// (download progress, install/switch/remove outcomes). The user
+	// asked for an explicit log box on the toolchain manager that
+	// mirrors the structure of the original build.sh script; this is
+	// it. Bigger row budget than a generic activity box on other
+	// screens because installs emit a lot of progress lines.
 	if s.app.Activity != nil {
-		out += components.ActivityPanel(s.app.Activity, w, 5, PanelDim, TitleStyle.Foreground(ColorDim)) + "\n"
+		out += components.TitledLogPanel("Toolchain Log", s.app.Activity, w, 12,
+			PanelDim, TitleStyle.Foreground(ColorDim)) + "\n"
 	}
-	out += divider + "  " + actions + "\n"
+	out += keysPanel + "\n"
 
 	if s.busy {
-		out += "\n  " + AccentText.Render(s.stage+" …") + "\n  " + s.prog.View() + "\n"
+		var dlLine string
+		if s.dlTotal > 0 {
+			pct := int(float64(s.dlDone) / float64(s.dlTotal) * 100)
+			dlLine = fmt.Sprintf("  %s / %s  (%d%%)",
+				sizeStr(s.dlDone), sizeStr(s.dlTotal), pct)
+		} else if s.dlDone > 0 {
+			dlLine = fmt.Sprintf("  %s downloaded", sizeStr(s.dlDone))
+		}
+		out += "\n  " + AccentText.Render(s.stage+" …") + "\n  " +
+			s.prog.View() + "\n" + DimText.Render(dlLine) + "\n"
 	}
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"

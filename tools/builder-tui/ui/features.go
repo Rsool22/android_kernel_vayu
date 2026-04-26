@@ -117,6 +117,11 @@ func (s FeaturesScreen) Update(msg tea.Msg) (FeaturesScreen, tea.Cmd) {
 			cmd = s.app.SetToast("Defconfig re-read.", false)
 		case "m":
 			return s, s.runMenuconfig()
+		case "c":
+			// STEP 1 -> STEP 2: confirm features and advance to build options.
+			// Mirrors original build.sh's [C] Confirm & Continue.
+			s.app.Screen = ScreenBuildOptions
+			return s, s.app.buildOpts.Init()
 		}
 		return s, cmd
 	case menuconfigDoneMsg:
@@ -274,24 +279,26 @@ func (s FeaturesScreen) View() string {
 	}
 	sumPanel := components.Panel("Active features", sm.String(), w, PanelBorder, TitleStyle)
 
-	// ── Action strip ────────────────────────────────────────────────────────
-	actions := components.HotkeyStrip([]components.Hotkey{
+	// ── Keys panel (replaces the old footer strip) ──────────────────────────
+	keysPanel := components.KeysPanel([]components.Hotkey{
 		{Key: "1", Desc: "ReSukiSU", Sub: "toggle"},
 		{Key: "2", Desc: "SuSFS", Sub: "toggle"},
 		{Key: "3", Desc: "KPM", Sub: "toggle"},
-		{Key: "M", Desc: "Menuconfig", Sub: "interactive"},
+		{Key: "M", Desc: "Menuconfig"},
+		{Key: "C", Desc: "Confirm", Sub: "build options"},
 		{Key: "R", Desc: "Reload"},
 		{Key: "ESC", Desc: "Back"},
-	}, HotKeyStyle, ValueStyle, DimText, MutedText)
+	}, w, PanelDim, TitleStyle.Foreground(ColorDim),
+		HotKeyStyle, ValueStyle, DimText, MutedText)
 
-	divider := "  " + components.Separator(innerW, MutedText) + "\n"
 	out := banner + "\n" + togPanel + "\n" + sumPanel + "\n"
 	if s.app.Activity != nil {
 		out += components.ActivityPanel(s.app.Activity, w, 5, PanelDim, TitleStyle.Foreground(ColorDim)) + "\n"
 	}
-	out += divider + "  " + actions + "\n"
+	out += keysPanel + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}
+	_ = innerW
 	return out
 }

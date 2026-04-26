@@ -447,15 +447,15 @@ func (s BuildScreen) View() string {
 		resultPanel = "\n" + s.renderResultPanel(w, inner) + "\n"
 	}
 
-	// Action strip.
-	actions := s.renderActions()
+	// Keys panel (replaces footer divider+strip).
+	keysPanel := components.KeysPanel(s.keysItems(), w, PanelDim, TitleStyle.Foreground(ColorDim),
+		HotKeyStyle, ValueStyle, DimText, MutedText)
 
-	out := banner + "\n" + stagesPanel + "\n" + vpHeader + s.vp.View() + resultPanel + "\n" +
-		"  " + components.Separator(inner, MutedText) + "\n" +
-		"  " + actions + "\n"
+	out := banner + "\n" + stagesPanel + "\n" + vpHeader + s.vp.View() + resultPanel + "\n" + keysPanel + "\n"
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}
+	_ = inner
 	return out
 }
 
@@ -641,13 +641,16 @@ func (s BuildScreen) renderCancelSummary(inner int) string {
 	return b.String()
 }
 
-func (s BuildScreen) renderActions() string {
+// keysItems returns the hotkey set appropriate for the current build state.
+// Replaces the legacy renderActions footer strip; rendering is handled by
+// components.KeysPanel.
+func (s BuildScreen) keysItems() []components.Hotkey {
 	if s.running {
-		return components.HotkeyStrip([]components.Hotkey{
+		return []components.Hotkey{
 			{Key: "Ctrl+C", Desc: "Cancel"},
 			{Key: "↑/↓", Desc: "Scroll"},
 			{Key: "ESC", Desc: "Main"},
-		}, HotKeyStyle, ValueStyle, DimText, MutedText)
+		}
 	}
 	if s.postBuild {
 		items := []components.Hotkey{
@@ -664,12 +667,12 @@ func (s BuildScreen) renderActions() string {
 			components.Hotkey{Key: "R", Desc: "Return to main"},
 			components.Hotkey{Key: "E", Desc: "Exit"},
 		)
-		return components.HotkeyStrip(items, HotKeyStyle, ValueStyle, DimText, MutedText)
+		return items
 	}
-	return components.HotkeyStrip([]components.Hotkey{
+	return []components.Hotkey{
 		{Key: "B", Desc: "Build", Sub: "configure → compile → package"},
 		{Key: "ESC", Desc: "Back"},
-	}, HotKeyStyle, ValueStyle, DimText, MutedText)
+	}
 }
 
 // truncate returns s clipped to maxRunes with an ellipsis when needed.

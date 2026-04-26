@@ -233,7 +233,7 @@ func (s SettingsScreen) View() string {
 		"Theme + accent colour are persisted to ~/.config/vayu_builder/config and reapplied on next launch.",
 		w, PanelDim, TitleStyle, DimText)
 
-	actions := components.HotkeyStrip([]components.Hotkey{
+	keysPanel := components.KeysPanel([]components.Hotkey{
 		{Key: "1", Desc: "Bash"},
 		{Key: "2", Desc: "Modern"},
 		{Key: "3", Desc: "Mono"},
@@ -242,11 +242,11 @@ func (s SettingsScreen) View() string {
 		{Key: "F", Desc: "Frame"},
 		{Key: "R", Desc: "Reset"},
 		{Key: "ESC", Desc: "Back"},
-	}, HotKeyStyle, ValueStyle, DimText, MutedText)
+	}, w, PanelDim, TitleStyle.Foreground(ColorDim),
+		HotKeyStyle, ValueStyle, DimText, MutedText)
 
-	divider := "  " + components.Separator(innerW, MutedText) + "\n"
-	out := banner + "\n" + statePanel + "\n" + themesPanel + "\n" + accPanel + "\n" + framePanel + editor + "\n" + notice + "\n" +
-		divider + "  " + actions + "\n"
+	out := banner + "\n" + statePanel + "\n" + themesPanel + "\n" + accPanel + "\n" + framePanel + editor + "\n" + notice + "\n" + keysPanel + "\n"
+	_ = innerW
 	if s.app.Toast != "" {
 		out += "\n  " + components.Toast(s.app.Toast, s.app.ToastErr) + "\n"
 	}

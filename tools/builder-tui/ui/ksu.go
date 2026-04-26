@@ -253,22 +253,26 @@ func (s KSUScreen) View() string {
 	ups.WriteString(probeRow("dev", branchW, s.dev, s.probed, innerW, s.app.Cfg.KSUBranch == "dev"))
 	upsPanel := components.Panel("Upstream branches", ups.String(), w, PanelBorder, TitleStyle)
 
-	// ── Action strip ────────────────────────────────────────────────────────
-	actions := components.HotkeyStrip([]components.Hotkey{
+	// ── Keys panel ──────────────────────────────────────────────────────────
+	keysPanel := components.KeysPanel([]components.Hotkey{
 		{Key: "I", Desc: "Install / update", Sub: "from active branch"},
 		{Key: "S", Desc: "Switch", Sub: "main ↔ dev"},
 		{Key: "V", Desc: "Verify guards"},
 		{Key: "X", Desc: "Remove driver"},
-		{Key: "P", Desc: "Re-probe"},
 		{Key: "ESC", Desc: "Back"},
-	}, HotKeyStyle, ValueStyle, DimText, MutedText)
+	}, w, PanelDim, TitleStyle.Foreground(ColorDim),
+		HotKeyStyle, ValueStyle, DimText, MutedText)
 
-	divider := "  " + components.Separator(innerContentWidth(w), MutedText) + "\n"
 	out := banner + "\n" + selPanel + "\n" + upsPanel + "\n"
+	// Run-log panel -- mirrors the structure of the original build.sh
+	// script's ReSukiSU manager. Documents every probe, install, guard
+	// run, and removal so the user has a persistent record after the
+	// toast banner has auto-dismissed.
 	if s.app.Activity != nil {
-		out += components.ActivityPanel(s.app.Activity, w, 5, PanelDim, TitleStyle.Foreground(ColorDim)) + "\n"
+		out += components.TitledLogPanel("ReSukiSU Log", s.app.Activity, w, 12,
+			PanelDim, TitleStyle.Foreground(ColorDim)) + "\n"
 	}
-	out += divider + "  " + actions + "\n"
+	out += keysPanel + "\n"
 
 	if s.busy {
 		out += "\n  " + AccentText.Render(s.stage+" …") + "\n"

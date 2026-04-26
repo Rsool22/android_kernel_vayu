@@ -347,7 +347,7 @@ func Install(ctx context.Context, rel Release, installDir string, progress Progr
 	}
 	defer os.Remove(tmpFile.Name())
 
-	if err := downloadTo(ctx, rel.URL, tmpFile, progress); err != nil {
+	if err := downloadTo(ctx, rel.URL, tmpFile, progress, rel.SizeBytes); err != nil {
 		tmpFile.Close()
 		return err
 	}
@@ -375,7 +375,7 @@ func hasClang(dir string) bool {
 	return err == nil && !st.IsDir() && st.Mode()&0o111 != 0
 }
 
-func downloadTo(ctx context.Context, url string, w io.Writer, progress ProgressFunc) error {
+func downloadTo(ctx context.Context, url string, w io.Writer, progress ProgressFunc, fallbackTotal int64) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -389,7 +389,15 @@ func downloadTo(ctx context.Context, url string, w io.Writer, progress ProgressF
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("http %d for %s", resp.StatusCode, url)
 	}
+	// Prefer the GET response's Content-Length, but fall back to the
+	// previously-probed HEAD size when the server returns chunked
+	// transfer (or otherwise hides the length). This keeps the progress
+	// bar from getting stuck at 0% on hosts like gitiles that serve
+	// archive bundles without an explicit length on the GET response.
 	total := resp.ContentLength
+	if total <= 0 && fallbackTotal > 0 {
+		total = fallbackTotal
+	}
 	pr := &progressReader{r: resp.Body, total: total, cb: progress}
 	_, err = io.Copy(w, pr)
 	return err

@@ -32,13 +32,17 @@ func (m MainMenu) pathsLocked() bool {
 
 // menuKeys returns the hotkey sequence matching the current menu order.
 // Kept in sync with the items slice in View(); if that slice changes,
-// this function must change too.
+// this function must change too. Note: F (Features) is intentionally
+// not in this list because it is now reached as a sub-step of [B] Build
+// (matches original build.sh's STEP 1 -> STEP 2 ordering). The 'f' key
+// case is still handled in Update() so users with muscle memory can
+// jump straight to features, but it does not show as a top-level row.
 func (m MainMenu) menuKeys() []string {
 	keys := []string{"b"}
 	if m.app.HasImage {
 		keys = append(keys, "p")
 	}
-	keys = append(keys, "t", "k", "f", "s", "d", "v", "q")
+	keys = append(keys, "t", "k", "s", "d", "v", "q")
 	return keys
 }
 
@@ -64,8 +68,10 @@ func (m MainMenu) Update(msg tea.Msg) (MainMenu, tea.Cmd) {
 			if m.pathsLocked() {
 				return m, m.app.SetToast("Cannot build — fix Clang / AnyKernel3 paths in Setup first", true)
 			}
-			m.app.Screen = ScreenBuildOptions
-			return m, m.app.buildOpts.Init()
+			// Build flow STEP 1 = features (matches original build.sh).
+			// User confirms feature toggles, then advances to options.
+			m.app.Screen = ScreenFeatures
+			return m, m.app.features.Init()
 		case "p":
 			// Package-only — only valid when Image already exists in out/.
 			if !m.app.HasImage {
@@ -196,7 +202,7 @@ func (m MainMenu) View() string {
 		branchTag = "main"
 	}
 	items := []menuItem{
-		{"B", "Build kernel", "options → compile → package", ColorOK, m.pathsLocked()},
+		{"B", "Build kernel", "features → options → compile → package", ColorOK, m.pathsLocked()},
 	}
 	if m.app.HasImage {
 		items = append(items, menuItem{"P", "Package existing image", "skip compile", ColorOK, m.pathsLocked()})
@@ -204,7 +210,6 @@ func (m MainMenu) View() string {
 	items = append(items,
 		menuItem{"T", "Toolchain manager", "Google AOSP / ZyC", ColorAccent, false},
 		menuItem{"K", "ReSukiSU driver", "branch: " + branchTag, ColorWarn, false},
-		menuItem{"F", "Feature toggles", "KSU / SuSFS / KPM / menuconfig", ColorAccent, false},
 		menuItem{"S", "Setup / paths", "edit 6 path slots", ColorAccent, false},
 		menuItem{"D", "Dependency check", "host packages probe", ColorAccent, false},
 		menuItem{"V", "Visuals / theme", "colours, accent, style", ColorAccent, false},
@@ -259,32 +264,37 @@ func (m MainMenu) View() string {
 		extras.WriteString("\n")
 	}
 
-	// ── Toast + help ─────────────────────────────────────────────────────────
+	// ── Keys panel (replaces the old footer divider + help line) ────────────
+	keys := []components.Hotkey{
+		{Key: "B", Desc: "Build"},
+	}
+	if m.app.HasImage {
+		keys = append(keys, components.Hotkey{Key: "P", Desc: "Package"})
+	}
+	keys = append(keys,
+		components.Hotkey{Key: "T", Desc: "Toolchain"},
+		components.Hotkey{Key: "K", Desc: "ReSukiSU"},
+		components.Hotkey{Key: "S", Desc: "Setup"},
+		components.Hotkey{Key: "D", Desc: "Deps"},
+		components.Hotkey{Key: "V", Desc: "Visuals"},
+		components.Hotkey{Key: "Q", Desc: "Quit"},
+	)
+	keysPanel := components.KeysPanel(keys, w, PanelDim, TitleStyle.Foreground(ColorDim),
+		HotKeyStyle, ValueStyle, DimText, MutedText)
+
 	var toast string
 	if m.app.Toast != "" {
 		toast = "  " + components.Toast(m.app.Toast, m.app.ToastErr) + "\n"
 	}
-
-	// Build the option string dynamically: [B/P/T/K/F/S/Q]
-	opts := []string{"B"}
-	if m.app.HasImage {
-		opts = append(opts, "P")
-	}
-	opts = append(opts, "T", "K", "F", "S", "D", "V", "Q")
-	help := HelpStyle.Render(fmt.Sprintf(
-		"  press [%s] · esc/q to quit · terminal %dx%d",
-		strings.Join(opts, "/"), m.app.Width, m.app.Height,
-	))
-
-	divider := "  " + components.Separator(innerW, MutedText) + "\n"
+	_ = innerW
+	_ = fmt.Sprintf
 	return banner + "\n" +
 		prevPanel + "\n" +
 		statusPanel + "\n" +
 		menuPanel + "\n" +
 		extras.String() +
-		divider +
-		toast +
-		help
+		keysPanel + "\n" +
+		toast
 }
 
 func okOr(s, alt string) string {

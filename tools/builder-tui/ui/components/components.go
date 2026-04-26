@@ -108,21 +108,15 @@ func KV(key, value string, keyWidth int, keyStyle, valStyle lipgloss.Style) stri
 	return k + sep + valStyle.Render(value)
 }
 
-// BracketTag renders "[label]" right-padded so the closing bracket sits at
-//
-//	column (1 + maxLabelWidth + 1). Used to keep [main]/[dev] columns aligned
-//
-// regardless of inner text length.
+// BracketTag renders a tight "[label]" with no internal padding. The
+// `maxLabelWidth` argument is accepted for backwards compatibility but
+// is no longer used to inflate the bracket -- callers wanting column
+// alignment should pad after the closing bracket themselves (or rely on
+// MenuRow / LeaderRow's right-aligned rhs which uses dotted leaders to
+// fill the gap regardless of label length).
 func BracketTag(label string, maxLabelWidth int, style lipgloss.Style) string {
-	if maxLabelWidth < lipgloss.Width(label) {
-		maxLabelWidth = lipgloss.Width(label)
-	}
-	pad := maxLabelWidth - lipgloss.Width(label)
-	if pad < 0 {
-		pad = 0
-	}
-	inner := label + strings.Repeat(" ", pad)
-	return style.Render("[" + inner + "]")
+	_ = maxLabelWidth
+	return style.Render("[" + label + "]")
 }
 
 // GlobalBracketTag renders BracketTag using GlobalKeyWidth so the closing
@@ -209,19 +203,14 @@ type Hotkey struct {
 	Key, Desc, Sub string
 }
 
-// HotkeyStrip renders a list of hotkeys with brackets right-padded so every
-// closing `]` aligns to the same column inside the strip. Items are joined
-// with a coloured separator.
+// HotkeyStrip renders a list of hotkeys joined with a coloured separator.
+// Brackets hug their labels (no internal padding) -- column alignment is
+// not attempted here, callers wanting aligned-column hotkeys should use
+// LeaderRow per-row instead.
 func HotkeyStrip(items []Hotkey, keyStyle, descStyle, subStyle, sepStyle lipgloss.Style) string {
-	maxKey := 0
-	for _, h := range items {
-		if len(h.Key) > maxKey {
-			maxKey = len(h.Key)
-		}
-	}
 	parts := make([]string, 0, len(items))
 	for _, h := range items {
-		row := BracketTag(h.Key, maxKey, keyStyle) + " " + descStyle.Render(h.Desc)
+		row := keyStyle.Render("["+h.Key+"]") + " " + descStyle.Render(h.Desc)
 		if h.Sub != "" {
 			row += " " + subStyle.Render("("+h.Sub+")")
 		}
@@ -229,6 +218,61 @@ func HotkeyStrip(items []Hotkey, keyStyle, descStyle, subStyle, sepStyle lipglos
 	}
 	sep := sepStyle.Render("  \u2502  ")
 	return strings.Join(parts, sep)
+}
+
+// HotkeyStripWrapped is HotkeyStrip but wraps to multiple lines when the
+// rendered strip would exceed `maxWidth` cells, so narrow terminals don't
+// truncate the hint row. Items are kept whole; the separator is dropped
+// at line breaks.
+func HotkeyStripWrapped(items []Hotkey, maxWidth int, keyStyle, descStyle, subStyle, sepStyle lipgloss.Style) string {
+	if maxWidth < 10 {
+		maxWidth = 10
+	}
+	sep := sepStyle.Render("  \u2502  ")
+	sepW := lipgloss.Width(sep)
+	rendered := make([]string, 0, len(items))
+	widths := make([]int, 0, len(items))
+	for _, h := range items {
+		row := keyStyle.Render("["+h.Key+"]") + " " + descStyle.Render(h.Desc)
+		if h.Sub != "" {
+			row += " " + subStyle.Render("("+h.Sub+")")
+		}
+		rendered = append(rendered, row)
+		widths = append(widths, lipgloss.Width(row))
+	}
+	var lines []string
+	var current []string
+	currentW := 0
+	for i, r := range rendered {
+		w := widths[i]
+		if len(current) == 0 {
+			current = append(current, r)
+			currentW = w
+			continue
+		}
+		if currentW+sepW+w > maxWidth {
+			lines = append(lines, strings.Join(current, sep))
+			current = []string{r}
+			currentW = w
+			continue
+		}
+		current = append(current, r)
+		currentW += sepW + w
+	}
+	if len(current) > 0 {
+		lines = append(lines, strings.Join(current, sep))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// KeysPanel renders a list of hotkeys inside a bordered panel titled
+// "KEYS". Replaces the previous bottom-of-screen "divider + raw strip"
+// pattern so the navigation hints have a defined edge that survives
+// terminal resize and matches the visual style of the other panels.
+func KeysPanel(items []Hotkey, width int, border lipgloss.Style, titleStyle, keyStyle, descStyle, subStyle, sepStyle lipgloss.Style) string {
+	inner := InnerWidth(width)
+	body := HotkeyStripWrapped(items, inner, keyStyle, descStyle, subStyle, sepStyle)
+	return Panel("Keys", body, width, border, titleStyle)
 }
 
 // Separator returns a thin horizontal divider used between sections at
