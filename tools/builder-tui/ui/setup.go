@@ -111,14 +111,12 @@ func (s SetupScreen) Update(msg tea.Msg) (SetupScreen, tea.Cmd) {
 				p, _ := discover.Resolve(".",
 					s.app.Cfg.KernelDir, s.app.Cfg.ClangDir, s.app.Cfg.AnyKernelDir, s.app.Cfg.OutputDir)
 				s.app.Paths = p
-				s.app.Toast = fieldLabel(s.editing) + " saved."
-				s.app.ToastErr = false
+				label := fieldLabel(s.editing)
 				s.editing = 0
-				return s, nil
+				return s, s.app.SetToast(label+" saved.", false)
 			case "esc":
 				s.editing = 0
-				s.app.Toast = "Edit cancelled."
-				return s, nil
+				return s, s.app.SetToast("Edit cancelled.", false)
 			}
 		}
 		var cmd tea.Cmd
@@ -132,8 +130,7 @@ func (s SetupScreen) Update(msg tea.Msg) (SetupScreen, tea.Cmd) {
 			p, _ := discover.Resolve(".",
 				s.app.Cfg.KernelDir, s.app.Cfg.ClangDir, s.app.Cfg.AnyKernelDir, s.app.Cfg.OutputDir)
 			s.app.Paths = p
-			s.app.Toast = "Paths re-scanned."
-			s.app.ToastErr = false
+			return s, s.app.SetToast("Paths re-scanned.", false)
 		case "1", "2", "3", "4", "5", "6":
 			f := pathField(m.String()[0] - '0')
 			s.editing = f

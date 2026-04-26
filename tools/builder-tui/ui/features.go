@@ -120,8 +120,9 @@ func (s FeaturesScreen) Update(msg tea.Msg) (FeaturesScreen, tea.Cmd) {
 		}
 		return s, cmd
 	case menuconfigDoneMsg:
-		s.handleMenuconfigDone(m)
+		cmd := s.handleMenuconfigDone(m)
 		s.refresh()
+		return s, cmd
 	}
 	return s, nil
 }
@@ -140,9 +141,7 @@ type menuconfigDoneMsg struct {
 // then resumes and emits a menuconfigDoneMsg with the outcome.
 func (s FeaturesScreen) runMenuconfig() tea.Cmd {
 	if s.app.Paths.Kernel == "" || s.app.Paths.Output == "" {
-		s.app.Toast = "Kernel/output paths unresolved -- run Setup first"
-		s.app.ToastErr = true
-		return nil
+		return s.app.SetToast("Kernel/output paths unresolved -- run Setup first", true)
 	}
 	cfg := filepath.Join(s.app.Paths.Output, ".config")
 	mtimeBefore := configMtime(cfg)
@@ -181,28 +180,21 @@ func (s FeaturesScreen) runMenuconfig() tea.Cmd {
 
 // handleMenuconfigDone processes the menuconfig result: mark MenuconfigUsed
 // when changes were saved, clear preserved file (mtime advance overrides
-// any pending preserved .config), and surface a toast.
-func (s FeaturesScreen) handleMenuconfigDone(m menuconfigDoneMsg) {
+// any pending preserved .config), and return an auto-dismiss toast Cmd.
+func (s FeaturesScreen) handleMenuconfigDone(m menuconfigDoneMsg) tea.Cmd {
 	if m.err != nil && m.rc < 0 {
-		s.app.Toast = "Menuconfig failed: " + m.err.Error()
-		s.app.ToastErr = true
-		return
+		return s.app.SetToast("Menuconfig failed: "+m.err.Error(), true)
 	}
 	if m.rc != 0 {
-		s.app.Toast = "Menuconfig aborted -- no changes applied"
-		s.app.ToastErr = false
-		return
+		return s.app.SetToast("Menuconfig aborted -- no changes applied", false)
 	}
 	if !m.saved {
-		s.app.Toast = "Menuconfig closed without saving -- no changes"
-		s.app.ToastErr = false
-		return
+		return s.app.SetToast("Menuconfig closed without saving -- no changes", false)
 	}
 	s.app.MenuconfigUsed = true
 	state.ClearMenuconfigPreserve(s.app.Paths.Kernel)
 	s.app.MenuconfigPreserved = false
-	s.app.Toast = "Menuconfig saved (Stage 2 defconfig regen skipped this session)"
-	s.app.ToastErr = false
+	return s.app.SetToast("Menuconfig saved (Stage 2 defconfig regen skipped this session)", false)
 }
 
 // configMtime returns the file mtime in unix seconds (or 0 when missing).

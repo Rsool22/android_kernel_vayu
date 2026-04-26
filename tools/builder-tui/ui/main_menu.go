@@ -62,23 +62,17 @@ func (m MainMenu) Update(msg tea.Msg) (MainMenu, tea.Cmd) {
 		switch key {
 		case "b":
 			if m.pathsLocked() {
-				m.app.Toast = "Cannot build — fix Clang / AnyKernel3 paths in Setup first"
-				m.app.ToastErr = true
-				return m, nil
+				return m, m.app.SetToast("Cannot build — fix Clang / AnyKernel3 paths in Setup first", true)
 			}
 			m.app.Screen = ScreenBuildOptions
 			return m, m.app.buildOpts.Init()
 		case "p":
 			// Package-only — only valid when Image already exists in out/.
 			if !m.app.HasImage {
-				m.app.Toast = "No previous Image in out/ — run a full build first"
-				m.app.ToastErr = true
-				return m, nil
+				return m, m.app.SetToast("No previous Image in out/ — run a full build first", true)
 			}
 			if m.pathsLocked() {
-				m.app.Toast = "Cannot package — AnyKernel3 path missing"
-				m.app.ToastErr = true
-				return m, nil
+				return m, m.app.SetToast("Cannot package — AnyKernel3 path missing", true)
 			}
 			m.app.PackageOnly = true
 			m.app.Screen = ScreenBuild

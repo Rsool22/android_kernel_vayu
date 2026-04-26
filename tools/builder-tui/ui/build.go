@@ -171,12 +171,9 @@ func (s BuildScreen) Update(msg tea.Msg) (BuildScreen, tea.Cmd) {
 		}
 	case savedefconfigDoneMsg:
 		if m.err != nil {
-			s.app.Toast = "savedefconfig failed: " + m.err.Error()
-			s.app.ToastErr = true
-		} else {
-			s.app.Toast = "vayu_defconfig updated from in-session menuconfig"
-			s.app.ToastErr = false
+			return s, s.app.SetToast("savedefconfig failed: "+m.err.Error(), true)
 		}
+		return s, s.app.SetToast("vayu_defconfig updated from in-session menuconfig", false)
 	case tea.KeyMsg:
 		if !s.postBuild && !s.running {
 			switch strings.ToLower(m.String()) {
@@ -218,13 +215,10 @@ func (s BuildScreen) handlePostBuild(m tea.KeyMsg) (BuildScreen, tea.Cmd) {
 		if s.app.MenuconfigUsed {
 			cfg := filepath.Join(s.app.Paths.Output, ".config")
 			if err := state.SaveMenuconfigPreserve(s.app.Paths.Kernel, cfg); err != nil {
-				s.app.Toast = "Preserve failed: " + err.Error()
-				s.app.ToastErr = true
-			} else {
-				s.app.MenuconfigPreserved = true
-				s.app.Toast = "Menuconfig .config preserved -- restored on next build"
-				s.app.ToastErr = false
+				return s, s.app.SetToast("Preserve failed: "+err.Error(), true)
 			}
+			s.app.MenuconfigPreserved = true
+			return s, s.app.SetToast("Menuconfig .config preserved -- restored on next build", false)
 		}
 		return s, nil
 	case "d":
@@ -295,9 +289,7 @@ func copyToFile(src, dst string) error {
 // that starts the spinner and stopwatch and clears prior state.
 func (s BuildScreen) startBuild() (BuildScreen, tea.Cmd) {
 	if s.app.Paths.Clang == "" || s.app.Paths.AnyKernel == "" {
-		s.app.Toast = "Cannot build — fix Clang / AnyKernel3 paths first"
-		s.app.ToastErr = true
-		return s, nil
+		return s, s.app.SetToast("Cannot build — fix Clang / AnyKernel3 paths first", true)
 	}
 	s.running = true
 	s.postBuild = false

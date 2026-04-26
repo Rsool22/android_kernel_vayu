@@ -60,13 +60,11 @@ func (s BuildOptionsScreen) Update(msg tea.Msg) (BuildOptionsScreen, tea.Cmd) {
 				_ = s.app.Cfg.Save()
 				s.editing = false
 				s.ti.Blur()
-				if v == "" {
-					s.app.Toast = "Kernel-Name cleared"
-				} else {
-					s.app.Toast = "Kernel-Name set to " + v
+				msgText := "Kernel-Name cleared"
+				if v != "" {
+					msgText = "Kernel-Name set to " + v
 				}
-				s.app.ToastErr = false
-				return s, nil
+				return s, s.app.SetToast(msgText, false)
 			case "esc":
 				s.editing = false
 				s.ti.Blur()
@@ -90,53 +88,38 @@ func (s BuildOptionsScreen) Update(msg tea.Msg) (BuildOptionsScreen, tea.Cmd) {
 		case "i":
 			s.app.Builder.Incremental = !s.app.Builder.Incremental
 			if s.app.Builder.ForceCleanReason != "" && s.app.Builder.Incremental {
-				s.app.Toast = fmt.Sprintf("Incremental locked off — %s requires clean", s.app.Builder.ForceCleanReason)
-				s.app.ToastErr = true
 				s.app.Builder.Incremental = false
-				return s, nil
+				return s, s.app.SetToast(fmt.Sprintf("Incremental locked off — %s requires clean", s.app.Builder.ForceCleanReason), true)
 			}
 			if err := s.app.Builder.Save(s.app.Paths.Kernel); err != nil {
-				s.app.Toast = "Save failed: " + err.Error()
-				s.app.ToastErr = true
-				return s, nil
+				return s, s.app.SetToast("Save failed: "+err.Error(), true)
 			}
+			msgText := "Incremental: OFF (full clean)"
 			if s.app.Builder.Incremental {
-				s.app.Toast = "Incremental: ON (skip clean)"
-			} else {
-				s.app.Toast = "Incremental: OFF (full clean)"
+				msgText = "Incremental: ON (skip clean)"
 			}
-			s.app.ToastErr = false
+			return s, s.app.SetToast(msgText, false)
 		case "c":
 			if !s.ccacheOK {
-				s.app.Toast = "ccache not installed — install ccache via Setup → Dependencies"
-				s.app.ToastErr = true
-				return s, nil
+				return s, s.app.SetToast("ccache not installed — install ccache via Setup → Dependencies", true)
 			}
 			s.app.Builder.UseCcache = !s.app.Builder.UseCcache
 			if err := s.app.Builder.Save(s.app.Paths.Kernel); err != nil {
-				s.app.Toast = "Save failed: " + err.Error()
-				s.app.ToastErr = true
-				return s, nil
+				return s, s.app.SetToast("Save failed: "+err.Error(), true)
 			}
+			msgText := "ccache: OFF"
 			if s.app.Builder.UseCcache {
-				s.app.Toast = "ccache: ON"
-			} else {
-				s.app.Toast = "ccache: OFF"
+				msgText = "ccache: ON"
 			}
-			s.app.ToastErr = false
+			return s, s.app.SetToast(msgText, false)
 		case "x":
 			if err := state.ResetBuildNumber(s.app.Paths.Kernel, s.app.Paths.Output); err != nil {
-				s.app.Toast = "Reset failed: " + err.Error()
-				s.app.ToastErr = true
-				return s, nil
+				return s, s.app.SetToast("Reset failed: "+err.Error(), true)
 			}
-			s.app.Toast = "Build counter reset → next build is #1"
-			s.app.ToastErr = false
+			return s, s.app.SetToast("Build counter reset → next build is #1", false)
 		case "s":
 			if s.app.Paths.Clang == "" || s.app.Paths.AnyKernel == "" {
-				s.app.Toast = "Cannot start — fix Clang / AnyKernel3 paths first"
-				s.app.ToastErr = true
-				return s, nil
+				return s, s.app.SetToast("Cannot start — fix Clang / AnyKernel3 paths first", true)
 			}
 			s.app.Screen = ScreenBuild
 			return s, s.app.build.Init()
