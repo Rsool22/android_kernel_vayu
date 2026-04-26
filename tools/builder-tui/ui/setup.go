@@ -26,9 +26,17 @@ const (
 // SetupScreen renders the resolved paths panel + distro install hints
 // and exposes inline path editing via bubbles textinput.
 type SetupScreen struct {
-	app   *App
+	app     *App
 	editing pathField
-	input textinput.Model
+	input   textinput.Model
+	// focus is the ↑/↓ row cursor (0-based, indexes into pathFields()).
+	// Enter on the focused row opens its inline editor.
+	focus int
+}
+
+// pathFields lists the editable rows in display order.
+func (s SetupScreen) pathFields() []pathField {
+	return []pathField{fieldKernel, fieldClang, fieldAnyKernel, fieldOutput, fieldGcc64, fieldGcc32}
 }
 
 func NewSetupScreen(a *App) SetupScreen {
@@ -125,7 +133,26 @@ func (s SetupScreen) Update(msg tea.Msg) (SetupScreen, tea.Cmd) {
 	}
 	switch m := msg.(type) {
 	case tea.KeyMsg:
-		switch strings.ToLower(m.String()) {
+		key := strings.ToLower(m.String())
+		fields := s.pathFields()
+		n := len(fields)
+		switch key {
+		case "up", "k":
+			s.focus = (s.focus + n - 1) % n
+			return s, nil
+		case "down", "j":
+			s.focus = (s.focus + 1) % n
+			return s, nil
+		case "enter", " ":
+			if s.focus >= 0 && s.focus < n {
+				f := fields[s.focus]
+				s.editing = f
+				s.input.SetValue(s.fieldValue(f))
+				s.input.Focus()
+				return s, textinput.Blink
+			}
+		}
+		switch key {
 		case "r":
 			p, _ := discover.Resolve(".",
 				s.app.Cfg.KernelDir, s.app.Cfg.ClangDir, s.app.Cfg.AnyKernelDir, s.app.Cfg.OutputDir)
@@ -134,6 +161,7 @@ func (s SetupScreen) Update(msg tea.Msg) (SetupScreen, tea.Cmd) {
 		case "1", "2", "3", "4", "5", "6":
 			f := pathField(m.String()[0] - '0')
 			s.editing = f
+			s.focus = int(f) - 1
 			s.input.SetValue(s.fieldValue(f))
 			s.input.Focus()
 			return s, textinput.Blink
@@ -172,9 +200,10 @@ func (s SetupScreen) View() string {
 		if r.bad {
 			v = ErrText
 		}
+		cursor := components.CursorCell(i == s.focus, AccentText)
 		tag := components.GlobalBracketTag(r.key, HotKeyStyle)
 		label := LabelStyle.Render(padTo(r.label, labelW))
-		prefix := tag + "  " + label
+		prefix := cursor + tag + "  " + label
 		p.WriteString(components.LeaderRow(prefix, v.Render(r.value), innerW, MutedText))
 		if i < len(rows)-1 {
 			p.WriteString("\n")

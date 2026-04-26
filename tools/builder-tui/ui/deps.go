@@ -90,7 +90,14 @@ type DepsScreen struct {
 	probed bool
 	busy   bool
 	stage  string
+	// focus is the ↑/↓ cursor over the action row (0=Probe, 1=Install,
+	// 2=Copy install command).
+	focus int
 }
+
+// depsActionKeys returns the action hotkeys in the order they appear on
+// screen. Used by arrow-nav so Enter dispatches the focused action.
+func (s DepsScreen) depsActionKeys() []string { return []string{"p", "i", "c"} }
 
 func NewDepsScreen(a *App) DepsScreen { return DepsScreen{app: a} }
 
@@ -233,7 +240,21 @@ func (s DepsScreen) Update(msg tea.Msg) (DepsScreen, tea.Cmd) {
 		if s.busy {
 			return s, nil
 		}
-		switch strings.ToLower(m.String()) {
+		key := strings.ToLower(m.String())
+		// Arrow-nav over the action row + Enter dispatch (prompt #5).
+		akeys := s.depsActionKeys()
+		n := len(akeys)
+		switch key {
+		case "up", "k":
+			s.focus = (s.focus + n - 1) % n
+			return s, nil
+		case "down", "j":
+			s.focus = (s.focus + 1) % n
+			return s, nil
+		case "enter", " ":
+			key = akeys[s.focus]
+		}
+		switch key {
 		case "p":
 			s.busy = true
 			s.stage = "probing host dependencies"

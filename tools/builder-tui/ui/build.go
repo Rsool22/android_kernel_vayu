@@ -86,13 +86,17 @@ func (s BuildScreen) Update(msg tea.Msg) (BuildScreen, tea.Cmd) {
 	switch m := msg.(type) {
 	case tea.WindowSizeMsg:
 		w := panelWidth(m.Width)
-		s.vp.Width = w - 4
-		if s.vp.Width < 40 {
-			s.vp.Width = 40
+		// Match the panel content width so the compile viewport never
+		// paints wider than the surrounding box. Floor at 20 so the
+		// viewport renders something sensible even on very narrow
+		// terminals (Termius portrait, etc).
+		s.vp.Width = innerContentWidth(w)
+		if s.vp.Width < 20 {
+			s.vp.Width = 20
 		}
 		s.vp.Height = m.Height - 22
-		if s.vp.Height < 8 {
-			s.vp.Height = 8
+		if s.vp.Height < 6 {
+			s.vp.Height = 6
 		}
 	case spinner.TickMsg:
 		var cmd tea.Cmd

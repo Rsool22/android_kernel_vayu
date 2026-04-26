@@ -27,6 +27,16 @@ type BuildOptionsScreen struct {
 	editing  bool
 	dirty    bool
 	ccacheOK bool
+	// focus is the ↑/↓ cursor on the build-options rows. Indexes into
+	// buildOptKeys() so Enter can dispatch the focused action.
+	focus int
+}
+
+// buildOptKeys is the hotkey order shown on the screen. Kept in sync
+// with the body rendering order so arrow nav and Enter fire on the
+// right action.
+func (s BuildOptionsScreen) buildOptKeys() []string {
+	return []string{"n", "i", "c", "x", "s", "b"}
 }
 
 // NewBuildOptionsScreen constructs the screen with a textinput for kernel
@@ -79,7 +89,23 @@ func (s BuildOptionsScreen) Update(msg tea.Msg) (BuildOptionsScreen, tea.Cmd) {
 
 	switch m := msg.(type) {
 	case tea.KeyMsg:
-		switch strings.ToLower(m.String()) {
+		key := strings.ToLower(m.String())
+		// Arrow-nav over the build-options rows. Enter / Space fires
+		// the action the cursor is on. (prompt #5 — extend to every
+		// menu screen, not just main / toolchain / features.)
+		keys := s.buildOptKeys()
+		n := len(keys)
+		switch key {
+		case "up", "k":
+			s.focus = (s.focus + n - 1) % n
+			return s, nil
+		case "down", "j":
+			s.focus = (s.focus + 1) % n
+			return s, nil
+		case "enter", " ":
+			key = keys[s.focus]
+		}
+		switch key {
 		case "n":
 			s.editing = true
 			s.ti.SetValue(s.app.Cfg.KernelName)
@@ -152,7 +178,14 @@ func (s BuildOptionsScreen) View() string {
 
 	// ── Toggles + actions panel ─────────────────────────────────────────────
 	var body strings.Builder
-	body.WriteString(buildOptRow("N", "Set Kernel-Name", knameValue(s.app.Cfg.KernelName), inner) + "\n")
+	keys := s.buildOptKeys()
+	isSel := func(k string) bool {
+		if s.focus < 0 || s.focus >= len(keys) {
+			return false
+		}
+		return keys[s.focus] == strings.ToLower(k)
+	}
+	body.WriteString(buildOptRow("N", "Set Kernel-Name", knameValue(s.app.Cfg.KernelName), inner, isSel("n")) + "\n")
 	body.WriteString(components.Separator(inner, MutedText) + "\n")
 
 	// Incremental — locked when ForceCleanReason set
@@ -166,7 +199,7 @@ func (s BuildOptionsScreen) View() string {
 		incVal = "LOCKED — " + reason
 		incStyle = ErrText
 	}
-	body.WriteString(buildOptRowStyled("I", "Toggle Incremental", incVal, incStyle, inner) + "\n")
+	body.WriteString(buildOptRowStyled("I", "Toggle Incremental", incVal, incStyle, inner, isSel("i")) + "\n")
 
 	// ccache
 	ccVal := "OFF"
@@ -178,18 +211,18 @@ func (s BuildOptionsScreen) View() string {
 		ccVal = "ON"
 		ccStyle = OKText
 	}
-	body.WriteString(buildOptRowStyled("C", "Toggle ccache", ccVal, ccStyle, inner) + "\n")
+	body.WriteString(buildOptRowStyled("C", "Toggle ccache", ccVal, ccStyle, inner, isSel("c")) + "\n")
 	body.WriteString(components.Separator(inner, MutedText) + "\n")
 
 	// Counter
 	next := state.ReadBuildNumber(s.app.Paths.Kernel)
 	body.WriteString(buildOptRowStyled("X", "Reset Build Counter",
-		fmt.Sprintf("next #%s → #1", strconv.Itoa(next)), AccentText, inner) + "\n")
+		fmt.Sprintf("next #%s → #1", strconv.Itoa(next)), AccentText, inner, isSel("x")) + "\n")
 	body.WriteString(components.Separator(inner, MutedText) + "\n")
 
 	body.WriteString(buildOptRowStyled("S", "Start Build",
-		fmt.Sprintf("compile + package as #%s", strconv.Itoa(next)), OKText, inner) + "\n")
-	body.WriteString(buildOptRowStyled("B", "Back", "to Features", LabelStyle, inner))
+		fmt.Sprintf("compile + package as #%s", strconv.Itoa(next)), OKText, inner, isSel("s")) + "\n")
+	body.WriteString(buildOptRowStyled("B", "Back", "to Features", LabelStyle, inner, isSel("b")))
 	togglesPanel := components.Panel("Build Options", body.String(), w, PanelBorder, TitleStyle)
 
 	// ── Inline kernel-name editor ───────────────────────────────────────────
@@ -222,14 +255,17 @@ func (s BuildOptionsScreen) View() string {
 
 // buildOptRow renders a `[K]  Label .................. value` row using
 // ValueStyle for the value.
-func buildOptRow(key, label, value string, width int) string {
-	return buildOptRowStyled(key, label, value, ValueStyle, width)
+func buildOptRow(key, label, value string, width int, selected bool) string {
+	return buildOptRowStyled(key, label, value, ValueStyle, width, selected)
 }
 
-// buildOptRowStyled is buildOptRow with explicit value style.
-func buildOptRowStyled(key, label, value string, valStyle lipgloss.Style, width int) string {
+// buildOptRowStyled is buildOptRow with explicit value style. When
+// selected is true, the row gets a `›` cursor cell prefix so arrow-nav
+// is visible to the user.
+func buildOptRowStyled(key, label, value string, valStyle lipgloss.Style, width int, selected bool) string {
+	cursor := components.CursorCell(selected, AccentText)
 	tag := components.GlobalBracketTag(key, HotKeyStyle)
-	prefix := tag + "  " + ValueStyle.Render(label)
+	prefix := cursor + tag + "  " + ValueStyle.Render(label)
 	rhs := valStyle.Render(value)
 	pad := width - lipgloss.Width(prefix) - lipgloss.Width(rhs) - 2
 	if pad < 1 {

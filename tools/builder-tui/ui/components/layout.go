@@ -61,13 +61,26 @@ const (
 // use. All boxes (banner, panels, activity, notices) on the same page
 // MUST pass this same return value as their width parameter so they all
 // render at the uniform box width the prompt calls for.
+//
+// We never clamp UP to PageMinWidth because that produces boxes wider
+// than the actual terminal on small Termius / phone-portrait windows,
+// which makes the double-line borders wrap and the whole layout look
+// shredded. Instead we shrink to whatever fits, down to a hard floor of
+// 30 cols (below that nothing the TUI does is going to look right
+// anyway, but at least we won't render boxes wider than the terminal).
 func PageWidth(termWidth int) int {
 	if termWidth <= 0 {
+		// No WindowSizeMsg yet -- assume a sane default and let the
+		// first redraw correct it.
 		termWidth = 80
 	}
 	w := termWidth - PageMargin
-	if w < PageMinWidth {
-		w = PageMinWidth
+	// Floor to keep dotted-leader / key-alignment math sane on
+	// pathological widths. Anything below the floor falls through to
+	// the floor; rendering will still be cramped but won't blow up.
+	const hardFloor = 30
+	if w < hardFloor {
+		w = hardFloor
 	}
 	if w > PageMaxWidth {
 		w = PageMaxWidth
@@ -79,10 +92,14 @@ func PageWidth(termWidth int) int {
 // outerW, i.e. after the borders and the lipgloss padding on each side
 // have been subtracted. Use this to size dotted-leader rows, ruled
 // dividers, lipgloss.PlaceHorizontal centering, etc.
+//
+// Floors to a small positive value so callers that take w-something never
+// produce a negative. Callers that need a real minimum should clamp
+// upstream rather than depending on this floor.
 func InnerWidth(outerW int) int {
 	w := outerW - BoxChrome
-	if w < 20 {
-		w = 20
+	if w < 8 {
+		w = 8
 	}
 	return w
 }
