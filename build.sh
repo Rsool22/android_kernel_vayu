@@ -150,20 +150,44 @@ if [ -n "${VAYU_BUILDER_BIN:-}" ] && [ -x "${VAYU_BUILDER_BIN}" ]; then
 fi
 step 1 "Override env (\$VAYU_BUILDER_BIN)" "${VAYU_BUILDER_BIN:-(unset)}"
 
-# 2) Local dev binary.
+# 2) Local dev binary -- only used as-is when the source tree is older
+#    than the cached binary. Otherwise we fall through to the from-source
+#    rebuild in step 3 so the user always runs against the latest TUI.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCAL_BIN="${SCRIPT_DIR}/bin/vayu-builder"
-if [ -x "$LOCAL_BIN" ]; then
-    step 2 "Local binary"          "$LOCAL_BIN  (use)"
+SRC_DIR="${SCRIPT_DIR}/tools/builder-tui"
+
+# sources_newer_than <binary>
+#   Returns 0 (true) when any *.go file under $SRC_DIR is newer than the
+#   given binary (or when the binary doesn't exist). Returns 1 (false)
+#   when the binary is up-to-date relative to source. Falls back to "true"
+#   on any error so we err on the side of rebuilding.
+sources_newer_than() {
+    local bin="$1"
+    [ -x "$bin" ] || return 0
+    [ -d "$SRC_DIR" ] || return 1
+    if find "$SRC_DIR" \( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' \) \
+            -newer "$bin" -print -quit 2>/dev/null | grep -q .; then
+        return 0
+    fi
+    return 1
+}
+
+if [ -x "$LOCAL_BIN" ] && [ "${VAYU_BUILDER_FORCE_REBUILD:-0}" != "1" ] \
+        && ! sources_newer_than "$LOCAL_BIN"; then
+    step 2 "Local binary"          "$LOCAL_BIN  (up to date)"
     panel_close
     echo
     ok "launching ${LOCAL_BIN}"
     exec "$LOCAL_BIN" "$@"
 fi
-step 2 "Local binary"              "(none at ${LOCAL_BIN})"
+if [ -x "$LOCAL_BIN" ]; then
+    step 2 "Local binary"          "$LOCAL_BIN  (stale -- rebuilding)"
+else
+    step 2 "Local binary"          "(none at ${LOCAL_BIN})"
+fi
 
 # 3) From-source build (if Go is available and tools/ exists).
-SRC_DIR="${SCRIPT_DIR}/tools/builder-tui"
 if [ "${VAYU_BUILDER_NO_BUILD:-0}" != "1" ] && [ -d "$SRC_DIR" ] && [ -f "${SRC_DIR}/go.mod" ]; then
     if command -v go >/dev/null 2>&1; then
         GO_VER="$(go version 2>/dev/null | awk '{print $3}')"
